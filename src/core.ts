@@ -247,13 +247,15 @@ export class EventReader<T extends Event> {
     if (!q) return;
 
     while (this.#previousIndex < q.previousBuffer.length) {
-      yield q.previousBuffer[this.#previousIndex];
+      const val = q.previousBuffer[this.#previousIndex];
       this.#previousIndex++;
+      yield val;
     }
 
     while (this.#currentIndex < q.currentBuffer.length) {
-      yield q.currentBuffer[this.#currentIndex];
+      const val = q.currentBuffer[this.#currentIndex];
       this.#currentIndex++;
+      yield val;
     }
   }
 
@@ -292,7 +294,7 @@ export class EventWriter<T extends Event> {
   }
 }
 
-class EventQueue<T extends Event> {
+export class EventQueue<T extends Event<any>> {
   #currentBuffer: Array<T["typeof"]> = [];
   #previousBuffer: Array<T["typeof"]> = [];
   #readers = new Set<WeakRef<EventReader<T>>>();
@@ -528,7 +530,7 @@ export class World {
       }
 
       if (this.has(entity, constructorOf(component))) {
-        this.remove(entity, constructorOf(component));
+        throw Error(`Entity ${entity} already contains component ${constructorOf(component).name}`);
       }
 
       (<any>component)[currentEntity] = entity;

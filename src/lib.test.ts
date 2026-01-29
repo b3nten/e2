@@ -2,19 +2,18 @@ import { assertEquals, assertExists, assertThrows } from "jsr:@std/assert";
 import { CompositeMap } from "./lib.ts";
 import { ObjectPool } from "./lib.ts";
 
-// Test helper types and factories
-interface TestObject {
+interface ObjectPool_TestObject {
   id: number;
   value: string;
   resetCount: number;
 }
 
-interface Counter {
+interface ObjectPool_Counter {
   count: number;
 }
 
 Deno.test("ObjectPool - basic construction with initial size", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 5,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
@@ -26,7 +25,7 @@ Deno.test("ObjectPool - basic construction with initial size", () => {
 
 Deno.test("ObjectPool - construction with resetObject", () => {
   let resetCallCount = 0;
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 3,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
     resetObject: (obj) => {
@@ -42,7 +41,7 @@ Deno.test("ObjectPool - construction with resetObject", () => {
 });
 
 Deno.test("ObjectPool - alloc returns objects from pool", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 3,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
@@ -61,7 +60,7 @@ Deno.test("ObjectPool - alloc returns objects from pool", () => {
 });
 
 Deno.test("ObjectPool - alloc grows pool when exhausted (default strategy)", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 2,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
@@ -80,7 +79,7 @@ Deno.test("ObjectPool - alloc grows pool when exhausted (default strategy)", () 
 });
 
 Deno.test("ObjectPool - custom growth strategy", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 2,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
     growthStrategy: (currentSize) => currentSize + 1, // Linear growth
@@ -98,7 +97,7 @@ Deno.test("ObjectPool - custom growth strategy", () => {
 });
 
 Deno.test("ObjectPool - free returns object to pool", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 3,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
@@ -114,7 +113,7 @@ Deno.test("ObjectPool - free returns object to pool", () => {
 });
 
 Deno.test("ObjectPool - free calls resetObject", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 2,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
     resetObject: (obj) => {
@@ -133,12 +132,12 @@ Deno.test("ObjectPool - free calls resetObject", () => {
 });
 
 Deno.test("ObjectPool - free ignores objects not in active set", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 2,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
 
-  const externalObj: TestObject = { id: 999, value: "external", resetCount: 0 };
+  const externalObj: ObjectPool_TestObject = { id: 999, value: "external", resetCount: 0 };
 
   // Should not throw or affect pool
   pool.free(externalObj);
@@ -148,7 +147,7 @@ Deno.test("ObjectPool - free ignores objects not in active set", () => {
 });
 
 Deno.test("ObjectPool - free same object twice (idempotent)", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 2,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
     resetObject: (obj) => obj.resetCount++,
@@ -167,7 +166,7 @@ Deno.test("ObjectPool - free same object twice (idempotent)", () => {
 });
 
 Deno.test("ObjectPool - freeAll returns all active objects", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 5,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
@@ -185,7 +184,7 @@ Deno.test("ObjectPool - freeAll returns all active objects", () => {
 });
 
 Deno.test("ObjectPool - freeAll calls resetObject on all objects", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 3,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
     resetObject: (obj) => {
@@ -212,7 +211,7 @@ Deno.test("ObjectPool - freeAll calls resetObject on all objects", () => {
 });
 
 Deno.test("ObjectPool - freeAll with no active objects", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 3,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
@@ -223,7 +222,7 @@ Deno.test("ObjectPool - freeAll with no active objects", () => {
 });
 
 Deno.test("ObjectPool - reuse freed objects", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 2,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
@@ -239,7 +238,7 @@ Deno.test("ObjectPool - reuse freed objects", () => {
 });
 
 Deno.test("ObjectPool - complex lifecycle", () => {
-  const pool = new ObjectPool<Counter>({
+  const pool = new ObjectPool<ObjectPool_Counter>({
     initialSize: 2,
     createObject: (index) => ({ count: 0 }),
     resetObject: (obj) => { obj.count = 0; },
@@ -273,7 +272,7 @@ Deno.test("ObjectPool - complex lifecycle", () => {
 });
 
 Deno.test("ObjectPool - zero initial size", () => {
-  const pool = new ObjectPool<TestObject>({
+  const pool = new ObjectPool<ObjectPool_TestObject>({
     initialSize: 0,
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
@@ -288,12 +287,12 @@ Deno.test("ObjectPool - zero initial size", () => {
 });
 
 Deno.test("ObjectPool - large pool operations", () => {
-  const pool = new ObjectPool<Counter>({
+  const pool = new ObjectPool<ObjectPool_Counter>({
     initialSize: 100,
     createObject: (index) => ({ count: index }),
   });
 
-  const objects: Counter[] = [];
+  const objects: ObjectPool_Counter[] = [];
 
   // Allocate 100 objects
   for (let i = 0; i < 100; i++) {
@@ -317,7 +316,7 @@ Deno.test("ObjectPool - large pool operations", () => {
 });
 
 Deno.test("ObjectPool - without resetObject", () => {
-  const pool = new ObjectPool<Counter>({
+  const pool = new ObjectPool<ObjectPool_Counter>({
     initialSize: 2,
     createObject: (index) => ({ count: 0 }),
   });
@@ -333,7 +332,7 @@ Deno.test("ObjectPool - without resetObject", () => {
 });
 
 Deno.test("ObjectPool - method binding", () => {
-  const pool = new ObjectPool<Counter>({
+  const pool = new ObjectPool<ObjectPool_Counter>({
     initialSize: 2,
     createObject: (index) => ({ count: index }),
   });
@@ -354,7 +353,7 @@ Deno.test("ObjectPool - method binding", () => {
 });
 
 Deno.test("ObjectPool - growth with custom strategy that returns 0", () => {
-  const pool = new ObjectPool<Counter>({
+  const pool = new ObjectPool<ObjectPool_Counter>({
     initialSize: 1,
     createObject: (index) => ({ count: index }),
     growthStrategy: () => 0, // Bad strategy
@@ -367,7 +366,7 @@ Deno.test("ObjectPool - growth with custom strategy that returns 0", () => {
 
 Deno.test("ObjectPool - createObject receives correct indices", () => {
   const indices: number[] = [];
-  const pool = new ObjectPool<Counter>({
+  const pool = new ObjectPool<ObjectPool_Counter>({
     initialSize: 3,
     createObject: (index) => {
       indices.push(index);
