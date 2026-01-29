@@ -41,6 +41,7 @@ import {
   ConstructorOf,
   Immutable,
   InstanceOf,
+  noop,
   SparseSet,
 } from "./lib.ts";
 
@@ -385,10 +386,10 @@ class MutRef<T> {
 
 type QueryList = readonly (ConstructorOf<Object> | MutParam<any>)[];
 
-const isQuery = Symbol.for("QueryTag");
+const queryTag = Symbol.for("QueryTag");
 export function Query<T extends QueryList>(...values: T) {
   // @ts-expect-error
-  values[isQuery] = true;
+  values[queryTag] = true;
   return values;
 }
 
@@ -774,16 +775,18 @@ export class Configuration {
   /**
    * The update timestep in ms. A value of 0 uses requestAnimationFrame
    */
-  timeStep = 1000;
+  timeStep = 500;
   /**
-   * The fixedUpdate timestep in ms. Default is 50 / s.
+   * The fixedUpdate timestep in ms. Default is 50hz (20ms).
    */
-  fixedTimeStep = 50;
+  fixedTimeStep = 20;
   /**
    * If update and fixed update system errors should be thrown by the app.
    * Defaults to false.
    */
   throwOnSystemError = false;
+
+  onSystemError: (error: unknown) => void = noop;
 }
 
 export class App {
@@ -847,21 +850,22 @@ export class App {
 
     this.#started = true;
 
-    for (const [schedule, systems] of this.#providedSystems) {
-      for (const system of systems) {
-        this.#systems.get(schedule).add({
-          args: this.#createSystemArgs(system),
-          callback: system.callback,
-          name: system.name,
-        });
-      }
-    }
-
     try {
+      for (const [schedule, systems] of this.#providedSystems) {
+        for (const system of systems) {
+          this.#systems.get(schedule).add({
+            args: this.#createSystemArgs(system),
+            callback: system.callback,
+            name: system.name,
+          });
+        }
+      }
+
       for (const s of this.#systems.get(Schedule.PreStartup)) {
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
+          this.#config.onSystemError(error)
           appLogger.critical(`Error in pre startup system ${s.name}: ${error}`);
           throw error;
         }
@@ -871,6 +875,7 @@ export class App {
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
+          this.#config.onSystemError(error)
           appLogger.critical(`Error in startup system ${s.name}: ${error}`);
           throw error;
         }
@@ -880,6 +885,7 @@ export class App {
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
+          this.#config.onSystemError(error)
           appLogger.critical(`Error in post startup system ${s.name}: ${error}`);
           throw error;
         }
@@ -889,7 +895,7 @@ export class App {
       throw error;
     }
 
-    this.#update();
+    setTimeout(this.#update, 0)
 
     return this;
   }
@@ -902,16 +908,14 @@ export class App {
   }
 
   #update = () => {
-    // todo: use RAF when timeStep == 0
-    setTimeout(this.#update, this.#config.timeStep);
+    if (this.#config.timeStep === 0) {
+      requestAnimationFrame(this.#update)
+    } else {
+      setTimeout(this.#update, this.#config.timeStep);
+    }
 
     // capture time
-    const clock = this.#getResource(Clock);
-    assertInstanceOf(
-      clock,
-      Clock,
-      "Internal error: Clock does not exist as Resource",
-    );
+    const clock = this.#getResource(Clock)!;
     clock.capture();
 
     this.#runSystems(Schedule.PreUpdate);
@@ -919,12 +923,7 @@ export class App {
     this.#runSystems(Schedule.PostUpdate);
 
     // flush world (remove queued components and entities)
-    const world = this.#getResource(World);
-    assertInstanceOf(
-      world,
-      World,
-      "Internal error: World does not exist as Resource",
-    );
+    const world = this.#getResource(World)!;
     this.#runSystems(Schedule.WorldFlush);
     world.flush();
 
@@ -940,6 +939,7 @@ export class App {
       try {
         s.callback.apply(null, s.args);
       } catch (error) {
+        this.#config.onSystemError(error)
         if (this.#config.throwOnSystemError) {
           throw error;
         } else {
@@ -960,7 +960,7 @@ export class App {
     );
 
     for (const arg of system.args) {
-      if (isQuery in arg) {
+      if (queryTag in arg) {
         result.push({
           [Symbol.iterator]() {
             return world.queryIter(arg);
