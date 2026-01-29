@@ -527,11 +527,10 @@ export const currentEntity = Symbol.for("CurrentEntity");
 /*  `8b8' `8d8'   `Y88P'  88   YD Y88888P Y8888D' */
 
 // trigger keys
-class ComponentInserted { constructor(public entity: EntityID) {} }
-class ComponentRemovalScheduled { constructor(public entity: EntityID) { } }
-class EntitySpawned { constructor(public entity: EntityID) {} }
-class EntityDespawnScheduled { constructor(public entity: EntityID) { } }
-class ComponentChanged { constructor(public entity: EntityID) { } }
+export class ComponentInserted { constructor(public entity: EntityID) {} }
+export class ComponentRemovalScheduled { constructor(public entity: EntityID) { } }
+export class EntitySpawned { constructor(public entity: EntityID) {} }
+export class EntityDespawnScheduled { constructor(public entity: EntityID) { } }
 
 export class World {
 
@@ -1039,17 +1038,21 @@ export class App {
       `Clock resource must exist and be instanceof Clock`
     )
 
+    const triggerer = this.#resources.resolve(Triggerer)
     assertInstanceOf(
-      this.#resources.resolve(World),
+      triggerer,
+      Triggerer,
+      `Triggerer resource must exist and be instanceof Triggerer`
+    )
+
+    const world = this.#resources.resolve(World)
+    assertInstanceOf(
+      world,
       World,
       `World resource must exist and be instanceof World`
     )
 
-    assertInstanceOf(
-      this.#resources.resolve(Triggerer),
-      Triggerer,
-      `Triggerer resource must exist and be instanceof Triggerer`
-    )
+    world.triggerer = triggerer
 
     this.#started = true;
 
