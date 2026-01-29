@@ -1462,6 +1462,10 @@ export class ObjectPool<T> {
     this.createObject = options.createObject;
     this.resetObject = options.resetObject;
 
+    if (options.initialSize < 1) {
+      options.initialSize = 1
+    }
+
     for (let index = 0; index < options.initialSize; index++) {
       const object = this.createObject(index);
       this.resetObject?.(object);
@@ -1475,7 +1479,10 @@ export class ObjectPool<T> {
     // No more objects in the pool
     if (!object) {
       const currentSize = this.size;
-      const growthAmount = this.growthStrategy(currentSize);
+      let growthAmount = this.growthStrategy(currentSize);
+      if (growthAmount < 1) {
+        growthAmount = 1
+      }
       for (let index = 0; index < growthAmount; index++) {
         const newObject = this.createObject(currentSize + index);
         this.resetObject?.(newObject);
