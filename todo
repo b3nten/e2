@@ -19,6 +19,6 @@
 [ ] - three.js integration
     - [ ] renderer
     - [ ] objects
-[ ] - relationship system
+[x] - relationship system
 [ ] - subtype Resources
 [ ] - ecs tag (or similar solution)

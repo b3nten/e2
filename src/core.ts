@@ -36,11 +36,13 @@ _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 import {
   appLogger,
   assertInstanceOf,
+  assertNotNull,
   AutoMap,
   constructorOf,
   ConstructorOf,
   Immutable,
   InstanceOf,
+  mustExist,
   noop,
   SparseSet,
 } from "./lib.ts";
@@ -477,6 +479,32 @@ export class Triggerer {
     current.responders.forEach((it) =>
       (<(...payloads: Object[]) => void>it)(...payloads),
     );
+  }
+}
+
+/* d8888b. d88888b .d8888. */
+/* 88  `8D 88'     88'  YP */
+/* 88oobY' 88ooooo `8bo.   */
+/* 88`8b   88~~~~~   `Y8b. */
+/* 88 `88. 88.     db   8D */
+/* 88   YD Y88888P `8888Y' */
+
+export class ResourceManager {
+  #instances = new Map<any, any>();
+
+  add<T extends object>(res: ConstructorOf<T>) {
+    const instance = new res();
+    let current: any = res;
+    while (current && current !== Object && current != Function.prototype) {
+      if (!this.#instances.has(current)) {
+        this.#instances.set(current, instance);
+      }
+      current = Object.getPrototypeOf(current);
+    }
+  }
+
+  resolve<T extends object>(res: ConstructorOf<T>): T | null {
+    return (this.#instances.get(res) as T) ?? null;
   }
 }
 
@@ -938,47 +966,47 @@ export class Configuration {
 }
 
 export class App {
+
+  static WithDefaults(): App {
+    return new App().addPlugins(App.defaultPlugin)
+  }
+
+  static defaultPlugin = (app: App) => {
+    app.addResources(Clock, Triggerer, World, Configuration);
+    app.addSystems(Schedule.Startup, relationshipSystem)
+  }
+
   #providedSystems = new AutoMap<Schedule, Set<SystemBundle>>(() => new Set());
   #systems = new AutoMap<
     Schedule,
     Set<{ args: any[]; callback: any; name: string }>
   >(() => new Set());
-  #resources = new Map<ConstructorOf<Object>, Object>();
   #events = new Map<Event, EventQueue<any>>();
   #started = false;
   #destroyed = false;
-  #config: Configuration;
+  #resources = new ResourceManager
 
-  constructor(config: Configuration = new Configuration()) {
-    this.#config = config;
-    this.addResources(Clock, Triggerer, World);
-    this.addSystems(Schedule.Startup, relationshipSystem)
-  }
-
-  addPlugins(...plugins: Plugin[]) {
-    if (this.#started || this.#destroyed) return;
+  addPlugins(...plugins: Plugin[]): App {
+    if (this.#started || this.#destroyed) return this;
     plugins.forEach((it) => it(this));
     return this;
   }
 
-  addSystems(schedule: Schedule, ...systems: ReturnType<typeof System>[]) {
+  addSystems(schedule: Schedule, ...systems: ReturnType<typeof System>[]): App {
     if (this.#started || this.#destroyed) return this;
     systems.forEach((it) => this.#providedSystems.get(schedule).add(it));
     return this;
   }
 
-  addResources(...resources: ConstructorOf<Object>[]) {
+  addResources(...resources: ConstructorOf<Object>[]): App {
     if (this.#started || this.#destroyed) return this;
     for (const r of resources) {
-      if (this.#resources.has(r)) {
-        continue;
-      }
-      this.#resources.set(r, new r());
+      this.#resources.add(r)
     }
     return this;
   }
 
-  addEvents(...events: Event<any>[]) {
+  addEvents(...events: Event<any>[]): App {
     if (this.#started || this.#destroyed) return this;
     for (const e of events) {
       if (!this.#events.has(e)) {
@@ -988,7 +1016,7 @@ export class App {
     return this;
   }
 
-  run() {
+  run(): App {
     if (this.#started) return this;
 
     if (this.#destroyed) {
@@ -996,6 +1024,32 @@ export class App {
         "Attempted to run Application when it was previously destroyed",
       );
     }
+
+    const config = this.#resources.resolve(Configuration)
+
+    assertInstanceOf(
+      config,
+      Configuration,
+      `Configuration resource must exist and be instanceof Configuration`
+    )
+
+    assertInstanceOf(
+      this.#resources.resolve(Clock),
+      Clock,
+      `Clock resource must exist and be instanceof Clock`
+    )
+
+    assertInstanceOf(
+      this.#resources.resolve(World),
+      World,
+      `World resource must exist and be instanceof World`
+    )
+
+    assertInstanceOf(
+      this.#resources.resolve(Triggerer),
+      Triggerer,
+      `Triggerer resource must exist and be instanceof Triggerer`
+    )
 
     this.#started = true;
 
@@ -1011,30 +1065,33 @@ export class App {
       }
 
       for (const s of this.#systems.get(Schedule.PreStartup)) {
+        appLogger.debug("running system:", s.name)
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
-          this.#config.onSystemError(error)
+          config.onSystemError(error)
           appLogger.critical(`Error in pre startup system ${s.name}: ${error}`);
           throw error;
         }
       }
 
       for (const s of this.#systems.get(Schedule.Startup)) {
+        appLogger.debug("running system:", s.name)
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
-          this.#config.onSystemError(error)
+          config.onSystemError(error)
           appLogger.critical(`Error in startup system ${s.name}: ${error}`);
           throw error;
         }
       }
 
       for (const s of this.#systems.get(Schedule.PostStartup)) {
+        appLogger.debug("running system:", s.name)
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
-          this.#config.onSystemError(error)
+          config.onSystemError(error)
           appLogger.critical(`Error in post startup system ${s.name}: ${error}`);
           throw error;
         }
@@ -1057,14 +1114,20 @@ export class App {
   }
 
   #update = () => {
-    if (this.#config.timeStep === 0) {
+
+    const config = mustExist(
+      this.#resources.resolve(Configuration),
+      `Configuration resource does not exist.`
+    )
+
+    if (config.timeStep === 0) {
       requestAnimationFrame(this.#update)
     } else {
-      setTimeout(this.#update, this.#config.timeStep);
+      setTimeout(this.#update, config.timeStep);
     }
 
     // capture time
-    const clock = this.#getResource(Clock)!;
+    const clock = this.#resources.resolve(Clock)!;
     clock.capture();
 
     this.#runSystems(Schedule.PreUpdate);
@@ -1072,7 +1135,7 @@ export class App {
     this.#runSystems(Schedule.PostUpdate);
 
     // flush world (remove queued components and entities)
-    const world = this.#getResource(World)!;
+    const world = this.#resources.resolve(World)!;
     this.#runSystems(Schedule.WorldFlush);
     world.flush();
 
@@ -1084,12 +1147,17 @@ export class App {
   };
 
   #runSystems(schedule: Schedule) {
+    const config = mustExist(
+      this.#resources.resolve(Configuration),
+      `Configuration resource does not exist.`
+    )
     for (const s of this.#systems.get(schedule)) {
+      appLogger.debug("running system:", s.name)
       try {
         s.callback.apply(null, s.args);
       } catch (error) {
-        this.#config.onSystemError(error)
-        if (this.#config.throwOnSystemError) {
+        config.onSystemError(error)
+        if (config.throwOnSystemError) {
           throw error;
         } else {
           appLogger.critical(`Error in system ${s.name}: ${error}`);
@@ -1101,12 +1169,10 @@ export class App {
   #createSystemArgs(system: SystemBundle) {
     const result = [];
 
-    const world = this.#getResource(World);
-    assertInstanceOf(
-      world,
-      World,
-      "Internal error: World does not exist as Resource",
-    );
+    const world = mustExist(
+      this.#resources.resolve(World),
+      "World does not exist as Resource",
+    )
 
     for (const arg of system.args) {
       if (queryTag in arg) {
@@ -1132,7 +1198,7 @@ export class App {
         }
         result.push(queue.getWriter());
       } else {
-        const res = this.#getResource(arg);
+        const res = this.#resources.resolve(arg);
         if (!res) {
           throw Error(
             `Could not resolve argument ${arg.name} for system ${system.name}.`,
@@ -1143,9 +1209,5 @@ export class App {
     }
 
     return result;
-  }
-
-  #getResource<T extends Object>(res: ConstructorOf<T>): T | undefined {
-    return <T>this.#resources.get(res);
   }
 }

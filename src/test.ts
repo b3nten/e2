@@ -30,7 +30,7 @@ class Foo {
 }
 class Bar {}
 
-new App()
+App.WithDefaults()
   .addEvents(TestEvent)
   .addSystems(
     Schedule.Startup,
@@ -53,7 +53,7 @@ new App()
   .addSystems(
     Schedule.WorldFlush,
     System("Test", [Clock, World, Query(Bar, Mut(Foo))], (c, w, query) => {
-      console.log(w.mutatedComponentList);
+      console.log(w.changedComponents.get(Foo));
     }),
   )
   .run();
