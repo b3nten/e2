@@ -10,15 +10,25 @@
    l  l l   l /
    \ ml lm /_*/
 
-import { App, Clock, EvReader, Mut, Query, Schedule, System, World, Event, EvWriter } from "./core.ts";
+import {
+  App,
+  Clock,
+  EvReader,
+  Mut,
+  Query,
+  Schedule,
+  System,
+  World,
+  Event,
+  EvWriter,
+} from "./core.ts";
 
-const TestEvent = Event<string>("testEvent")
+const TestEvent = Event<string>("testEvent");
 
-class Foo{ lol = 1}
-class Bar{ }
-
-let a = 0;
-let b = 0;
+class Foo {
+  lol = 1;
+}
+class Bar {}
 
 new App()
   .addEvents(TestEvent)
@@ -34,21 +44,16 @@ new App()
     System("Test", [Clock, World, Query(Bar, Mut(Foo))], (c, w, query) => {
       for (const [entity, bar, foo] of query) {
         // console.log(entity, foo.deref());
+        if (foo.ref.lol < 5) {
+          foo.deref().lol++;
+        }
       }
     }),
-    System("EventWriter", [EvWriter(TestEvent)], (events) => {
-      events.write("eventWriter " + a++)
-    }),
-    System("EventReader", [EvReader(TestEvent)], (events) => {
-      for (const e of events) {
-        console.log("EventReader reading", e)
-      }
-    }),
-    System("EventReaderWriter", [EvReader(TestEvent), EvWriter(TestEvent)], (events, te) => {
-      for (const e of events) {
-        console.log("EventReaderWriter reading", e)
-      }
-      te.write("eventReaderWriter " + b++)
+  )
+  .addSystems(
+    Schedule.WorldFlush,
+    System("Test", [Clock, World, Query(Bar, Mut(Foo))], (c, w, query) => {
+      console.log(w.mutatedComponentList);
     }),
   )
   .run();

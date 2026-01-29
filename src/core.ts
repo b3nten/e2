@@ -52,15 +52,33 @@ import {
 /* `8888Y'  `Y88P' YP   YP Y88888P Y8888D' ~Y8888P' Y88888P Y88888P `8888Y' */
 
 export enum Schedule {
-  PreStartup,
-  Startup,
-  PostStartup,
+  PreStartup = "PreStartup",
+  Startup = "Startup",
+  PostStartup = "PostStartup",
+  /**
+   * Runs when an error occurs during startup.
+   */
+  StartupError = "StartupError",
 
-  PreUpdate,
-  Update,
-  PostUpdate,
+  PreUpdate = "PreUpdate",
+  Update = "Update",
+  PostUpdate = "PostUpdate",
 
-  Destroy,
+  /**
+   * Runs before the world flushes queued entity despawn,
+     component removal, and clears the list of mutated components.
+   */
+  WorldFlush = "WorldFlush",
+  /**
+   * Runs before the event system swaps their event buffers.
+   */
+  EventUpdate = "EventUpdate",
+
+  /**
+   * Runs when the App instance is destroyed.
+   */
+  Destroy = "Destroy",
+
 }
 
 /*  .o88b. db       .d88b.   .o88b. db   dD */
@@ -353,7 +371,7 @@ class MutRef<T> {
   }
 
   deref(): T {
-    // do change detection here
+    this.world.mutatedComponentList.add(this.value!)
     return this.value;
   }
 
@@ -479,7 +497,17 @@ export const currentEntity = Symbol.for("CurrentEntity");
 /* `8b d8'8b d8' `8b  d8' 88 `88. 88booo. 88  .8D */
 /*  `8b8' `8d8'   `Y88P'  88   YD Y88888P Y8888D' */
 
+// trigger keys
+class ComponentInserted { constructor(public entity: EntityID) {} }
+class ComponentRemovalScheduled { constructor(public entity: EntityID) { } }
+class EntitySpawned { constructor(public entity: EntityID) {} }
+class EntityDespawnScheduled { constructor(public entity: EntityID) { } }
+class ComponentChanged { constructor(public entity: EntityID) { } }
+
 export class World {
+
+  mutatedComponentList = new Set<Object>;
+
   #entityCount = 0;
   #entities: Set<EntityID> = new Set();
   #componentMap: AutoMap<ConstructorOf<Object>, SparseSet<Object>> =
@@ -491,9 +519,12 @@ export class World {
   #sharedIterResult: any[] = [];
   #mutWrappers = Array.from({ length: 100 }).map(() => new MutRef(this));
 
+  public triggerer?: Triggerer
+
   spawn(...components: Object[]): EntityID {
     const entity = ++this.#entityCount;
     this.#entities.add(entity);
+    this.triggerer?.trigger(new EntitySpawned(entity))
     for (const c of components) {
       this.insert(entity, c);
     }
@@ -506,8 +537,10 @@ export class World {
         throw Error(`Entity ${entity} does not exist`);
       }
     }
-
-    entities.forEach((it) => this.#despawnQueue.add(it));
+    entities.forEach((it) => {
+      this.#despawnQueue.add(it)
+      this.triggerer?.trigger(new EntityDespawnScheduled(it))
+    });
   }
 
   tryDespawn(...entities: EntityID[]): boolean {
@@ -535,6 +568,7 @@ export class World {
 
       (<any>component)[currentEntity] = entity;
       this.#componentMap.get(constructorOf(component)).add(entity, component);
+      this.triggerer?.trigger(new ComponentInserted(entity), component)
     }
   }
 
@@ -554,6 +588,7 @@ export class World {
 
     for (const component of components) {
       this.#removalQueue.get(component).add(entity);
+      this.triggerer?.trigger(new ComponentRemovalScheduled(entity), component)
     }
   }
 
@@ -625,6 +660,8 @@ export class World {
         }
       }
     }
+
+    this.mutatedComponentList.clear()
   }
 
   *queryIter<T extends QueryList>(
@@ -820,31 +857,36 @@ export class App {
       }
     }
 
-    for (const s of this.#systems.get(Schedule.PreStartup)) {
-      try {
-        s.callback.apply(null, s.args);
-      } catch (error) {
-        appLogger.critical(`Error in pre startup system ${s.name}: ${error}`);
-        throw error;
+    try {
+      for (const s of this.#systems.get(Schedule.PreStartup)) {
+        try {
+          s.callback.apply(null, s.args);
+        } catch (error) {
+          appLogger.critical(`Error in pre startup system ${s.name}: ${error}`);
+          throw error;
+        }
       }
-    }
 
-    for (const s of this.#systems.get(Schedule.Startup)) {
-      try {
-        s.callback.apply(null, s.args);
-      } catch (error) {
-        appLogger.critical(`Error in startup system ${s.name}: ${error}`);
-        throw error;
+      for (const s of this.#systems.get(Schedule.Startup)) {
+        try {
+          s.callback.apply(null, s.args);
+        } catch (error) {
+          appLogger.critical(`Error in startup system ${s.name}: ${error}`);
+          throw error;
+        }
       }
-    }
 
-    for (const s of this.#systems.get(Schedule.PostStartup)) {
-      try {
-        s.callback.apply(null, s.args);
-      } catch (error) {
-        appLogger.critical(`Error in post startup system ${s.name}: ${error}`);
-        throw error;
+      for (const s of this.#systems.get(Schedule.PostStartup)) {
+        try {
+          s.callback.apply(null, s.args);
+        } catch (error) {
+          appLogger.critical(`Error in post startup system ${s.name}: ${error}`);
+          throw error;
+        }
       }
+    } catch(error) {
+      this.#runSystems(Schedule.StartupError)
+      throw error;
     }
 
     this.#update();
@@ -860,6 +902,7 @@ export class App {
   }
 
   #update = () => {
+    // todo: use RAF when timeStep == 0
     setTimeout(this.#update, this.#config.timeStep);
 
     // capture time
@@ -882,9 +925,11 @@ export class App {
       World,
       "Internal error: World does not exist as Resource",
     );
+    this.#runSystems(Schedule.WorldFlush);
     world.flush();
 
     // update event queues
+    this.#runSystems(Schedule.EventUpdate);
     for (const queue of this.#events.values()) {
       queue.update();
     }
@@ -906,12 +951,14 @@ export class App {
 
   #createSystemArgs(system: SystemBundle) {
     const result = [];
+
     const world = this.#getResource(World);
     assertInstanceOf(
       world,
       World,
       "Internal error: World does not exist as Resource",
     );
+
     for (const arg of system.args) {
       if (isQuery in arg) {
         result.push({
@@ -945,6 +992,7 @@ export class App {
         result.push(res);
       }
     }
+
     return result;
   }
 

@@ -1,6 +1,6 @@
-[ ] - ECS change detection
-    - [ ] - add triggers
-    - [ ] - wire up to mutref
+[x] - ECS change detection
+    - [x] - add triggers
+    - [x] - wire up to mutref
 [ ] - Asset system
 [x] - Verify event system
 [ ] - Add debug logging
