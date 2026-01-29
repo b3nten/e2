@@ -2,18 +2,18 @@
     - [ ] - add triggers
     - [ ] - wire up to mutref
 [ ] - Asset system
-[ ] - Verify event system
+[x] - Verify event system
 [ ] - Add debug logging
 [ ] - create simple build pipeline
     - [ ] - tsc
     - [ ] - esbuild
 [ ] - add tests
     - [ ] lib
-    - [ ] events
+    - [x] events
     - [ ] triggers
-    - [ ] sparseset
-    - [ ] object pool
-    - [ ] ECS
+    - [x] sparseset
+    - [x] object pool
+    - [x] ECS
     - [ ] system
 [ ] - audio resource
 [ ] - three.js integration
