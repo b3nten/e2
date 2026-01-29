@@ -372,7 +372,7 @@ class MutRef<T> {
   }
 
   deref(): T {
-    this.world.mutatedComponentList.add(this.value!)
+    this.world.changedComponents.get(constructorOf(this.value!)).add(this.value!)
     return this.value;
   }
 
@@ -507,7 +507,7 @@ class ComponentChanged { constructor(public entity: EntityID) { } }
 
 export class World {
 
-  mutatedComponentList = new Set<Object>;
+  changedComponents = new AutoMap<Object, Set<Object>>(() => new Set);
 
   #entityCount = 0;
   #entities: Set<EntityID> = new Set();
@@ -615,21 +615,42 @@ export class World {
     return this.#entities.has(entity);
   }
 
-  get<T extends Object>(entity: EntityID, component: ConstructorOf<T>): T {
-    if (!this.#componentMap.get(component).has(entity)) {
-      throw Error(`Component ${component.name} does not exist on entity`);
+  get<T extends Object>(entity: EntityID, componentType: ConstructorOf<T>): Immutable<T> {
+    if (!this.#componentMap.get(componentType).has(entity)) {
+      throw Error(`Component ${componentType.name} does not exist on entity`);
     }
-    return <T>this.#componentMap.get(component).get(entity);
+    return <Immutable<T>>this.#componentMap.get(componentType).get(entity);
   }
 
   tryGet<T extends Object>(
     entity: EntityID,
     component: ConstructorOf<T>,
-  ): T | null {
+  ): Immutable<T> | null {
     if (!this.#componentMap.get(component).has(entity)) {
       return null;
     }
-    return <T>this.#componentMap.get(component).get(entity);
+    return <Immutable<T>>this.#componentMap.get(component).get(entity);
+  }
+
+  getMut<T extends Object>(entity: EntityID, componentType: ConstructorOf<T>): T {
+    if (!this.#componentMap.get(componentType).has(entity)) {
+      throw Error(`Component ${componentType.name} does not exist on entity`);
+    }
+    const component = <T>this.#componentMap.get(componentType).get(entity);
+    this.changedComponents.get(componentType).add(component)
+    return component
+  }
+
+  tryGetMut<T extends Object>(
+    entity: EntityID,
+    componentType: ConstructorOf<T>,
+  ): T | null {
+    if (!this.#componentMap.get(componentType).has(entity)) {
+      return null;
+    }
+    const component = <T>this.#componentMap.get(componentType).get(entity);
+    this.changedComponents.get(componentType).add(component)
+    return component
   }
 
   willDespawn(entity: EntityID): boolean {
@@ -662,7 +683,9 @@ export class World {
       }
     }
 
-    this.mutatedComponentList.clear()
+    for (const sets of this.changedComponents.values()) {
+      sets.clear()
+    }
   }
 
   *queryIter<T extends QueryList>(
@@ -707,6 +730,131 @@ export class World {
     }
   }
 }
+
+/* d8888b. d88888b db      */
+/* 88  `8D 88'     88      */
+/* 88oobY' 88ooooo 88      */
+/* 88`8b   88~~~~~ 88      */
+/* 88 `88. 88.     88booo. */
+/* 88   YD Y88888P Y88888P */
+
+export class Relationship {
+  /**
+   * Parent a child entity to a parent entity.
+   * @param world - the {@link World} with the parent and child entities
+   * @param parent - the parent {@link EntityID}
+   * @param child - the child {@link EntityID}
+   * @returns void on success, Error otherwise
+   */
+  static Parent(
+    world: World,
+    parent: EntityID,
+    child: EntityID,
+  ) {
+    if (!world.exists(parent) || !world.exists(child)) {
+      throw Error(`Cannot parent ${parent} to ${child}. One or both does not exist.`)
+    }
+
+    let parentRelationship = world.tryGetMut(parent, Relationship);
+
+    if (!parentRelationship) {
+      parentRelationship = new Relationship();
+      world.insert(parent, parentRelationship);
+    } else {
+      // check for circular relationships
+      let currentParent: EntityID | null = parent;
+      while (currentParent) {
+        if (currentParent === child) {
+          throw Error("Detected a circular relationship while parenting");
+        }
+        const currentRelationship: Relationship | null = world.tryGetMut(
+          currentParent,
+          Relationship,
+        );
+        currentParent = currentRelationship?._parent ?? null;
+      }
+    }
+
+    let childRelationship = world.tryGetMut(child, Relationship);
+    if (!childRelationship) {
+      childRelationship = new Relationship();
+      world.insert(child, childRelationship);
+    }
+
+    let oldParent = childRelationship._parent;
+    if (oldParent) {
+      Relationship.Unparent(world, oldParent, child);
+    }
+
+    parentRelationship._children ??= new Set<EntityID>();
+    parentRelationship._children.add(child);
+    childRelationship._parent = parent;
+  }
+
+  /**
+   * Unparent a child entity from a parent entity.
+   * @param world - the {@link World} with the parent and child entities
+   * @param parent - the parent {@link EntityID}
+   * @param child - the child {@link EntityID}
+   * @returns void on success, Error otherwise
+   */
+  static Unparent(
+    world: World,
+    parent: EntityID,
+    child: EntityID,
+  ): undefined | Error {
+    if (!world.exists(parent) || !world.exists(child)) {
+      throw Error(`Cannot unparent ${parent} to ${child}. One or both does not exist.`)
+    }
+    let childRelationship = world.tryGetMut(child, Relationship);
+    if (!childRelationship) {
+      return;
+    }
+    let parentRelationship = world.tryGetMut(parent, Relationship);
+    if (!parentRelationship) {
+      return;
+    }
+    if (childRelationship.parent === parent) {
+      childRelationship._parent = null;
+    }
+    parentRelationship._children?.delete(child);
+  }
+
+  /** Get the parent {@link EntityID} */
+  get parent(): EntityID | null {
+    return this._parent;
+  }
+
+  /** Get a readonly Set with {@link EntityID}s of child entities */
+  get children(): ChildSet {
+    return this._children ?? <ChildSet>EMPTY_SET;
+  }
+
+  protected _parent: EntityID | null = null;
+  protected _children?: Set<EntityID>;
+}
+
+type ChildSet = Omit<Set<EntityID>, "add" | "delete" | "clear">;
+const EMPTY_SET: Set<any> = new Set();
+
+const relationshipSystem = System("RelationshipSystem", [World, Triggerer], (w, t) => {
+  t.addResponder([ComponentRemovalScheduled, Relationship], ({ entity }, rel) => {
+    if (rel.parent) {
+      Relationship.Unparent(w, rel.parent, entity)
+    }
+    for (const child of rel.children) {
+      Relationship.Unparent(w, entity, child)
+    }
+  })
+  t.addResponder([EntityDespawnScheduled, Relationship], ({ entity }, rel) => {
+    if (rel.parent) {
+      Relationship.Unparent(w, rel.parent, entity)
+    }
+    for (const child of rel.children) {
+      w.despawn(child)
+    }
+  })
+})
 
 /* d8888b. db      db    db  d888b  d888888b d8b   db */
 /* 88  `8D 88      88    88 88' Y8b   `88'   888o  88 */
@@ -804,6 +952,7 @@ export class App {
   constructor(config: Configuration = new Configuration()) {
     this.#config = config;
     this.addResources(Clock, Triggerer, World);
+    this.addSystems(Schedule.Startup, relationshipSystem)
   }
 
   addPlugins(...plugins: Plugin[]) {
