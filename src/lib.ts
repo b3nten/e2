@@ -1076,7 +1076,9 @@ export function runCatching<T>(
   try {
     const result = fn();
     if (result instanceof Promise) {
-      return result.then(Ok).catch(Err) as any;
+      return result
+        .then(Ok)
+        .catch(Err) as any;
     }
     return Ok(result) as any;
   } catch (e) {

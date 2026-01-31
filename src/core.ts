@@ -38,6 +38,7 @@ import {
   assertInstanceOf,
   AutoMap,
   ConstructorOf,
+  Err,
   Immutable,
   InstanceOf,
   isConstructor,
@@ -46,6 +47,9 @@ import {
   LogLevel,
   mustExist,
   noop,
+  Ok,
+  Result,
+  runCatching,
   silentLogger,
   SparseSet,
 } from "./lib.ts";
@@ -136,111 +140,134 @@ export class Clock {
 /* YP   YP `8888Y' `8888Y' Y88888P    YP    */
 
 export class Handle<T> {
-  constructor(asset: Asset<T>) {
+  constructor(asset: Resource<AssetInstance<T>>) {
     this.#asset = asset;
   }
 
-  deref(): T | undefined {
-    return (<any>this.#asset).data;
+  get pending() {
+    return this.#asset.get().pending
   }
 
-  mustGet(): T {
-    if (!this.initalized) {
-      throw Error(
-        `mustGet asset ${this.#asset.constructor.name}: not initalized`,
-      );
-    }
-    return (<any>this.#asset).data!;
-  }
-
-  get initalized() {
-    return this.#asset.initalized;
-  }
-
-  get errored() {
-    return this.#asset.errored;
-  }
-
-  get loading() {
-    return this.#asset.loading;
-  }
-
-  #asset: Asset<T>;
-}
-
-export abstract class Asset<T> {
-  abstract initalizer(): Promise<T>;
-  abstract destructor(value: T): void;
-
-  private data: T | undefined;
-  #error: unknown;
-  #errored = false;
-  #promise?: Promise<void>;
-
-  get loading() {
-    return this.data === undefined && this.#promise !== undefined;
-  }
-
-  get initalized() {
-    return this.data !== undefined;
-  }
-
-  get errored() {
-    return this.#errored;
+  get promise() {
+    return this.#asset.get().promise
   }
 
   get error() {
-    return this.#error;
+    const data = this.#asset.get().data
+    if (data?.ok) return null
+    else return data?.error
   }
 
-  load() {
-    if (!this.initalized && !this.#promise) {
-      this.#promise = this.initalizer()
-        .then((data) => {
-          this.data = data;
-        })
-        .catch((error) => {
-          this.#errored = true;
-          this.#error = error;
-        })
-        .finally(() => {
-          this.#promise = undefined;
-        });
+  get ready() {
+    const a = this.#asset.get()
+    return a.data?.ok
+  }
+
+  get() {
+    const a = this.#asset.get()
+    if (a.pending) {
+      throw Error("Asset is pending")
     }
-  }
-
-  destroy() {
-    if (this.data !== undefined) {
-      this.destructor(this.data);
-      this.data = undefined;
-      this.#errored = false;
-      this.#error = undefined;
-      this.#promise = undefined;
-    } else if (this.#promise) {
-      const promiseToCancel = this.#promise;
-      this.#promise = undefined;
-      promiseToCancel.then(() => {
-        if (this.data !== undefined) {
-          this.destructor(this.data);
-          this.data = undefined;
-        }
-      });
+    if (!a.data?.ok) {
+      throw Error("Asset has errored")
     }
+    return a.data.value
   }
 
-  getHandle() {
-    const handle = new Handle(this);
-    return handle;
+  tryGet() {
+    const a = this.#asset.get()
+    if (a.pending || !a.data?.ok) {
+      return null
+    }
+    return a.data.value
   }
+
+  get ptr(): Readonly<AssetInstance<T>> {
+    return this.#asset.get()
+  }
+
+  #asset: Resource<AssetInstance<T>>
+}
+
+export interface AssetType<T extends any = unknown> {
+  path: string
+  load(signal: AbortSignal): Promise<T>
+  destroy?(instance: T): void
+}
+
+type AssetInstance<T> = {
+  data: Result<T> | null
+  promise: Promise<Result<T>>
+  pending: boolean
+  controller: AbortController
+  type: AssetType
 }
 
 export class AssetManager {
-  load<T extends Asset<any>>(asset: T): Handle<T> {
-    asset.load();
-    return asset.getHandle();
+  #resources = new Resources;
+
+  load<T>(asset: AssetType<T>): Handle<T> {
+    return new Handle(this.#resources.add(
+      asset.path,
+      this.#load(asset, this.#resources.tryGet<AssetInstance<T>>(asset.path))
+    ))
   }
 
-  batchLoad() {}
+  getOrLoad<T>(asset: AssetType<T>): Handle<T> {
+    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path)
+    if (instance) return new Handle(instance)
+
+    return new Handle(this.#resources.add(
+      asset.path,
+      this.#load(asset, null)
+    ))
+  }
+
+  get<T>(asset: AssetType<T>): Handle<T> {
+    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path)
+    if (!instance) throw Error(`Asset ${asset.path} does not exist`)
+    return new Handle(instance)
+  }
+
+  tryGet<T>(asset: AssetType<T>): Handle<T> | null {
+    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path)
+    if (!instance) return null
+    return new Handle(instance)
+  }
+
+  clone<T>(handle: Handle<T>): Handle<T> {
+    return this.get(handle.ptr.type) as Handle<T>
+  }
+
+  #load<T>(asset: AssetType<T>, oldRes: Resource<AssetInstance<T>> | null): AssetInstance<T> {
+    const old = oldRes?.tryGet();
+
+    if (old?.pending) {
+      old.controller.abort()
+    }
+
+    const assetInstance: Omit<AssetInstance<T>, "promise"> & Partial<AssetInstance<T>> = {
+      data: old?.data ?? null,
+      pending: true,
+      controller: new AbortController,
+      type: asset,
+    }
+
+    assetInstance.promise = runCatching(async () => {
+      const data = await asset.load(assetInstance.controller.signal)
+      if (assetInstance.controller.signal.aborted) {
+        throw Error("Aborted")
+      }
+      if (old?.data?.ok) {
+        try { asset.destroy?.(old.data.value) } catch { }
+      }
+      return data
+    }).finally(() => {
+      assetInstance.pending = false;
+    })
+
+    return <AssetInstance<T>>assetInstance
+  }
 }
 
 /* d88888b db    db d88888b d8b   db d888888b .d8888. */
@@ -516,14 +543,21 @@ type ResourcePtr<T = unknown> = {
   data: T | undefined;
   valid: boolean;
   refCount: number;
+  key: any;
 };
 
 export class Resource<T = unknown> {
   #ptr: ResourcePtr<T>;
   #disposed = false;
+  #res: Resources
 
-  private constructor(ptr: ResourcePtr<T>, disposalFn: VoidFunction) {
+  private constructor(
+    res: Resources,
+    ptr: ResourcePtr<T>,
+    disposalFn: VoidFunction
+  ) {
     this.#ptr = ptr;
+    this.#res = res;
     this.dispose = () => {
       if (this.#disposed) {
         return;
@@ -550,15 +584,24 @@ export class Resource<T = unknown> {
     return this.#ptr.data!;
   }
 
-  unwrap() {
-    return this.#ptr.data;
+  unwrap(): T | null {
+    return this.#ptr.data ?? null
+  }
+
+  clone(): Resource<T> {
+    return this.#res.clone(this)
+  }
+
+  /** @internal */
+  get ptr(): Readonly<ResourcePtr<T>> {
+    return this.#ptr
   }
 
   readonly dispose: VoidFunction;
 }
 
 export class Resources {
-  #storage = new Map<any, ResourcePtr>();
+  #storage = new Map<any, ResourcePtr>;
 
   #registry = new FinalizationRegistry<{ key: any; ptr: ResourcePtr }>(
     (ctx) => {
@@ -580,7 +623,7 @@ export class Resources {
       return this.#createResource(key, ptr);
     }
 
-    const ptr: ResourcePtr<T> = { data: value, valid: true, refCount: 1 };
+    const ptr: ResourcePtr<T> = { data: value, valid: true, refCount: 1, key };
     this.#storage.set(key, ptr);
 
     return this.#createResource(key, ptr);
@@ -604,11 +647,19 @@ export class Resources {
     return this.#createResource(key, <ResourcePtr<T>>ptr);
   }
 
+  clone<T>(res: Resource<T>): Resource<T> {
+    return this.get<T>(res.ptr.key)
+  }
+
+  unwrap<T = unknown>(key: any) {
+    return this.#storage.get(key)
+  }
+
   #createResource<T>(key: any, ptr: ResourcePtr<T>): Resource<T> {
     const token = {};
 
     // @ts-expect-error private constructor is module scoped
-    const resource = new Resource<T>(ptr, () => {
+    const resource = new Resource<T>(this, ptr, () => {
       this.#registry.unregister(token);
       this.#decrement(key, ptr);
     });
