@@ -24,17 +24,20 @@ import {
   Triggerer,
   EntitySpawned,
   ComponentInserted,
+  Configuration,
+  AppMode,
 
 } from "./core.ts";
+import { Logger } from "./lib.ts";
 
 const TestEvent = Event<string>("testEvent");
 
 class Foo {
   lol = 1;
 }
-class Bar {}
+class Bar { }
 
-App.WithDefaults()
+App.WithDefaults(class extends Configuration { mode = AppMode.Debug })
   .addEvents(TestEvent)
   .addSystems(
     Schedule.Startup,

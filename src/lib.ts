@@ -1119,6 +1119,11 @@ export function constructorOf<T extends Object>(ctor: T): ConstructorOf<T> {
   return ctor.constructor as ConstructorOf<T>;
 }
 
+/* Gets the constructor of an object. */
+export function ConstructorOf<T extends Object>(ctor: T): ConstructorOf<T> {
+  return ctor.constructor as ConstructorOf<T>;
+}
+
 export function forEach<T>(
   iterable: Iterable<T>,
   callback: (item: T, index: number) => void,
@@ -1969,6 +1974,11 @@ export function warnOnce(str: string) {
     appLogger.warn(str);
   }
 }
+
+export const silentLogger = new Logger(
+  "",
+  LogLevel.Silent,
+);
 
 /*  .o88b.  .d88b.  .88b  d88. d8888b.  .d88b.  .d8888. d888888b d888888b d88888b */
 /* d8P  Y8 .8P  Y8. 88'YbdP`88 88  `8D .8P  Y8. 88'  YP   `88'   `~~88~~' 88'     */

@@ -36,14 +36,17 @@ _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 import {
   appLogger,
   assertInstanceOf,
-  assertNotNull,
   AutoMap,
-  constructorOf,
   ConstructorOf,
   Immutable,
   InstanceOf,
+  isConstructor,
+  logColors,
+  Logger,
+  LogLevel,
   mustExist,
   noop,
+  silentLogger,
   SparseSet,
 } from "./lib.ts";
 
@@ -81,7 +84,6 @@ export enum Schedule {
    * Runs when the App instance is destroyed.
    */
   Destroy = "Destroy",
-
 }
 
 /*  .o88b. db       .d88b.   .o88b. db   dD */
@@ -360,12 +362,14 @@ export class EventQueue<T extends Event<any>> {
 /* `8P  d8' 88b  d88 88.     88 `88.    88    */
 /*  `Y88'Y8 ~Y8888P' Y88888P 88   YD    YP    */
 
+const mutTag = Symbol.for("MutTag");
+
 type MutParam<T> = {
-  mutComponent: T;
+  [mutTag]: T;
 };
 
 export function Mut<T>(value: T): MutParam<T> {
-  return { mutComponent: value };
+  return { [mutTag]: value };
 }
 
 class MutRef<T> {
@@ -374,7 +378,9 @@ class MutRef<T> {
   }
 
   deref(): T {
-    this.world.changedComponents.get(constructorOf(this.value!)).add(this.value!)
+    this.world.changedComponents
+      .get(ConstructorOf(this.value!))
+      .add(this.value!);
     return this.value;
   }
 
@@ -471,7 +477,7 @@ export class Triggerer {
   trigger(...payloads: Object[]) {
     let current = this.#storage;
     for (const _t of payloads) {
-      const t = constructorOf(_t);
+      const t = ConstructorOf(_t);
       const next = current.children.get(t);
       if (!next) return;
       current = next;
@@ -496,9 +502,7 @@ export class ResourceManager {
     const instance = new res();
     let current: any = res;
     while (current && current !== Object && current != Function.prototype) {
-      if (!this.#instances.has(current)) {
-        this.#instances.set(current, instance);
-      }
+      this.#instances.set(current, instance);
       current = Object.getPrototypeOf(current);
     }
   }
@@ -527,14 +531,21 @@ export const currentEntity = Symbol.for("CurrentEntity");
 /*  `8b8' `8d8'   `Y88P'  88   YD Y88888P Y8888D' */
 
 // trigger keys
-export class ComponentInserted { constructor(public entity: EntityID) {} }
-export class ComponentRemovalScheduled { constructor(public entity: EntityID) { } }
-export class EntitySpawned { constructor(public entity: EntityID) {} }
-export class EntityDespawnScheduled { constructor(public entity: EntityID) { } }
+export class ComponentInserted {
+  constructor(public entity: EntityID) {}
+}
+export class ComponentRemovalScheduled {
+  constructor(public entity: EntityID) {}
+}
+export class EntitySpawned {
+  constructor(public entity: EntityID) {}
+}
+export class EntityDespawnScheduled {
+  constructor(public entity: EntityID) {}
+}
 
 export class World {
-
-  changedComponents = new AutoMap<Object, Set<Object>>(() => new Set);
+  changedComponents = new AutoMap<Object, Set<Object>>(() => new Set());
 
   #entityCount = 0;
   #entities: Set<EntityID> = new Set();
@@ -547,12 +558,12 @@ export class World {
   #sharedIterResult: any[] = [];
   #mutWrappers = Array.from({ length: 100 }).map(() => new MutRef(this));
 
-  public triggerer?: Triggerer
+  public triggerer?: Triggerer;
 
   spawn(...components: Object[]): EntityID {
     const entity = ++this.#entityCount;
     this.#entities.add(entity);
-    this.triggerer?.trigger(new EntitySpawned(entity))
+    this.triggerer?.trigger(new EntitySpawned(entity));
     for (const c of components) {
       this.insert(entity, c);
     }
@@ -566,8 +577,8 @@ export class World {
       }
     }
     entities.forEach((it) => {
-      this.#despawnQueue.add(it)
-      this.triggerer?.trigger(new EntityDespawnScheduled(it))
+      this.#despawnQueue.add(it);
+      this.triggerer?.trigger(new EntityDespawnScheduled(it));
     });
   }
 
@@ -590,13 +601,15 @@ export class World {
         throw Error(`Component exists on another entity`);
       }
 
-      if (this.has(entity, constructorOf(component))) {
-        throw Error(`Entity ${entity} already contains component ${constructorOf(component).name}`);
+      if (this.has(entity, ConstructorOf(component))) {
+        throw Error(
+          `Entity ${entity} already contains component ${ConstructorOf(component).name}`,
+        );
       }
 
       (<any>component)[currentEntity] = entity;
-      this.#componentMap.get(constructorOf(component)).add(entity, component);
-      this.triggerer?.trigger(new ComponentInserted(entity), component)
+      this.#componentMap.get(ConstructorOf(component)).add(entity, component);
+      this.triggerer?.trigger(new ComponentInserted(entity), component);
     }
   }
 
@@ -616,11 +629,11 @@ export class World {
 
     for (const component of components) {
       this.#removalQueue.get(component).add(entity);
-      this.triggerer?.trigger(new ComponentRemovalScheduled(entity), component)
+      this.triggerer?.trigger(new ComponentRemovalScheduled(entity), component);
     }
   }
 
-  tryRemove(entity: EntityID, ...components: ConstructorOf<Object>[]) {
+  tryRemove(entity: EntityID, ...components: ConstructorOf<Object>[]): boolean {
     try {
       this.remove(entity, ...components);
       return true;
@@ -642,7 +655,10 @@ export class World {
     return this.#entities.has(entity);
   }
 
-  get<T extends Object>(entity: EntityID, componentType: ConstructorOf<T>): Immutable<T> {
+  get<T extends Object>(
+    entity: EntityID,
+    componentType: ConstructorOf<T>,
+  ): Immutable<T> {
     if (!this.#componentMap.get(componentType).has(entity)) {
       throw Error(`Component ${componentType.name} does not exist on entity`);
     }
@@ -659,13 +675,16 @@ export class World {
     return <Immutable<T>>this.#componentMap.get(component).get(entity);
   }
 
-  getMut<T extends Object>(entity: EntityID, componentType: ConstructorOf<T>): T {
+  getMut<T extends Object>(
+    entity: EntityID,
+    componentType: ConstructorOf<T>,
+  ): T {
     if (!this.#componentMap.get(componentType).has(entity)) {
       throw Error(`Component ${componentType.name} does not exist on entity`);
     }
     const component = <T>this.#componentMap.get(componentType).get(entity);
-    this.changedComponents.get(componentType).add(component)
-    return component
+    this.changedComponents.get(componentType).add(component);
+    return component;
   }
 
   tryGetMut<T extends Object>(
@@ -676,8 +695,51 @@ export class World {
       return null;
     }
     const component = <T>this.#componentMap.get(componentType).get(entity);
-    this.changedComponents.get(componentType).add(component)
-    return component
+    this.changedComponents.get(componentType).add(component);
+    return component;
+  }
+
+  swap<T extends Object>(
+    componentType: ConstructorOf<T>,
+    from: EntityID,
+    to: EntityID,
+  ) {
+    if (!this.#componentMap.get(componentType).has(from)) {
+      throw Error(`Component ${componentType.name} does not exist on entity`);
+    }
+    if (!this.exists(to)) {
+      throw Error(`to value of swap does not exist in world`);
+    }
+
+    const component = this.#componentMap.get(componentType).get(from)!;
+    this.triggerer?.trigger(new ComponentRemovalScheduled(from), component);
+
+    (<any>component)[currentEntity] = to;
+    this.#componentMap.get(componentType).remove(from);
+    this.#componentMap.get(componentType).add(to, component);
+
+    this.triggerer?.trigger(new ComponentInserted(to), component);
+  }
+
+  trySwap<T extends Object>(
+    componentType: ConstructorOf<T>,
+    from: EntityID,
+    to: EntityID,
+  ): boolean {
+    if (!this.#componentMap.get(componentType).has(from) || !this.exists(to)) {
+      return false;
+    }
+
+    const component = this.#componentMap.get(componentType).get(from)!;
+    this.triggerer?.trigger(new ComponentRemovalScheduled(from), component);
+
+    (<any>component)[currentEntity] = to;
+
+    this.#componentMap.get(componentType).remove(from);
+    this.#componentMap.get(componentType).add(to, component);
+    this.triggerer?.trigger(new ComponentInserted(to), component);
+
+    return true;
   }
 
   willDespawn(entity: EntityID): boolean {
@@ -709,9 +771,11 @@ export class World {
         }
       }
     }
+  }
 
+  clear() {
     for (const sets of this.changedComponents.values()) {
-      sets.clear()
+      sets.clear();
     }
   }
 
@@ -748,7 +812,7 @@ export class World {
         // move on if component is missing
         if (!this.#sharedIterResult[i + 1]) continue outer;
 
-        if ("mutComponent" in query[i]) {
+        if (mutTag in query[i]) {
           (<any>this.#mutWrappers[i]).value = this.#sharedIterResult[i + 1];
           this.#sharedIterResult[i + 1] = this.#mutWrappers[i];
         }
@@ -773,13 +837,11 @@ export class Relationship {
    * @param child - the child {@link EntityID}
    * @returns void on success, Error otherwise
    */
-  static Parent(
-    world: World,
-    parent: EntityID,
-    child: EntityID,
-  ) {
+  static Parent(world: World, parent: EntityID, child: EntityID) {
     if (!world.exists(parent) || !world.exists(child)) {
-      throw Error(`Cannot parent ${parent} to ${child}. One or both does not exist.`)
+      throw Error(
+        `Cannot parent ${parent} to ${child}. One or both does not exist.`,
+      );
     }
 
     let parentRelationship = world.tryGetMut(parent, Relationship);
@@ -831,7 +893,9 @@ export class Relationship {
     child: EntityID,
   ): undefined | Error {
     if (!world.exists(parent) || !world.exists(child)) {
-      throw Error(`Cannot unparent ${parent} to ${child}. One or both does not exist.`)
+      throw Error(
+        `Cannot unparent ${parent} to ${child}. One or both does not exist.`,
+      );
     }
     let childRelationship = world.tryGetMut(child, Relationship);
     if (!childRelationship) {
@@ -864,24 +928,34 @@ export class Relationship {
 type ChildSet = Omit<Set<EntityID>, "add" | "delete" | "clear">;
 const EMPTY_SET: Set<any> = new Set();
 
-const relationshipSystem = System("RelationshipSystem", [World, Triggerer], (w, t) => {
-  t.addResponder([ComponentRemovalScheduled, Relationship], ({ entity }, rel) => {
-    if (rel.parent) {
-      Relationship.Unparent(w, rel.parent, entity)
-    }
-    for (const child of rel.children) {
-      Relationship.Unparent(w, entity, child)
-    }
-  })
-  t.addResponder([EntityDespawnScheduled, Relationship], ({ entity }, rel) => {
-    if (rel.parent) {
-      Relationship.Unparent(w, rel.parent, entity)
-    }
-    for (const child of rel.children) {
-      w.despawn(child)
-    }
-  })
-})
+const relationshipSystem = System(
+  "RelationshipSystem",
+  [World, Triggerer],
+  (w, t) => {
+    t.addResponder(
+      [ComponentRemovalScheduled, Relationship],
+      ({ entity }, rel) => {
+        if (rel.parent) {
+          Relationship.Unparent(w, rel.parent, entity);
+        }
+        for (const child of rel.children) {
+          Relationship.Unparent(w, entity, child);
+        }
+      },
+    );
+    t.addResponder(
+      [EntityDespawnScheduled, Relationship],
+      ({ entity }, rel) => {
+        if (rel.parent) {
+          Relationship.Unparent(w, rel.parent, entity);
+        }
+        for (const child of rel.children) {
+          w.despawn(child);
+        }
+      },
+    );
+  },
+);
 
 /* d8888b. db      db    db  d888b  d888888b d8b   db */
 /* 88  `8D 88      88    88 88' Y8b   `88'   888o  88 */
@@ -890,7 +964,13 @@ const relationshipSystem = System("RelationshipSystem", [World, Triggerer], (w, 
 /* 88      88booo. 88b  d88 88. ~8~   .88.   88  V888 */
 /* 88      Y88888P ~Y8888P'  Y888P  Y888888P VP   V8P */
 
+const pluginName = Symbol.for("PluginName")
 export type Plugin = (app: App) => void;
+export function Plugin(name: string, plugin: Plugin): Plugin {
+  // @ts-expect-error
+  plugin[pluginName] = name
+  return plugin
+}
 
 /* .d8888. db    db .d8888. d888888b d88888b .88b  d88. */
 /* 88'  YP `8b  d8' 88'  YP `~~88~~' 88'     88'YbdP`88 */
@@ -937,7 +1017,7 @@ export function System<T extends readonly any[] = []>(
   return { name, args, callback };
 }
 
-export type SystemBundle = ReturnType<typeof System>;
+export type System = ReturnType<typeof System>;
 
 /*  .d8b.  d8888b. d8888b. */
 /* d8' `8b 88  `8D 88  `8D */
@@ -945,6 +1025,12 @@ export type SystemBundle = ReturnType<typeof System>;
 /* 88~~~88 88~~~   88~~~   */
 /* 88   88 88      88      */
 /* YP   YP 88      88      */
+
+export enum AppMode {
+  Debug = "ModeDebug",
+  Dev = "ModeDev",
+  Prod = "ModeProd",
+}
 
 export class Configuration {
   /**
@@ -960,22 +1046,28 @@ export class Configuration {
    * Defaults to false.
    */
   throwOnSystemError = false;
-
+  /**
+   * Called when any system errors. Can be used for reporting etc.
+   */
   onSystemError: (error: unknown) => void = noop;
+
+  mode: AppMode = AppMode.Prod;
+
+  logger?: Logger;
 }
 
 export class App {
 
-  static WithDefaults(): App {
-    return new App().addPlugins(App.defaultPlugin)
+static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
+    app.addResources(Clock, Triggerer, World);
+    app.addSystems(Schedule.Startup, relationshipSystem);
+  });
+
+  static WithDefaults(config?: Configuration | ConstructorOf<Configuration>): App {
+    return new App(config).addPlugins(App.defaultsPlugin);
   }
 
-  static defaultPlugin = (app: App) => {
-    app.addResources(Clock, Triggerer, World, Configuration);
-    app.addSystems(Schedule.Startup, relationshipSystem)
-  }
-
-  #providedSystems = new AutoMap<Schedule, Set<SystemBundle>>(() => new Set());
+  #providedSystems = new AutoMap<Schedule, Set<System>>(() => new Set());
   #systems = new AutoMap<
     Schedule,
     Set<{ args: any[]; callback: any; name: string }>
@@ -983,78 +1075,122 @@ export class App {
   #events = new Map<Event, EventQueue<any>>();
   #started = false;
   #destroyed = false;
-  #resources = new ResourceManager
+  #resources = new ResourceManager();
+  #config: Configuration
+
+  constructor(config: Configuration | ConstructorOf<Configuration>) {
+    this.#config = isConstructor(config) ? new config : config;
+
+    // init logger using AppMode
+    if (!this.#config.logger) {
+      this.#config.logger = new Logger(
+        "app",
+        this.#config.mode === AppMode.Debug
+          ? LogLevel.Debug
+          : this.#config.mode === AppMode.Dev
+            ? LogLevel.Info
+            : LogLevel.Silent,
+        logColors.purple,
+      );
+    }
+  }
 
   addPlugins(...plugins: Plugin[]): App {
-    if (this.#started || this.#destroyed) return this;
-    plugins.forEach((it) => it(this));
+    if (this.#started || this.#destroyed) {
+      this.#logger.warn("Attempted to add a plugin to App, which is either running or destroyed")
+      return this;
+    }
+    plugins.forEach((it) => {
+      // @ts-expect-error
+      this.#logger.info(`Registering plugin ${it[pluginName] ?? "AnonPlugin"}`)
+      it(this)
+    });
     return this;
   }
 
   addSystems(schedule: Schedule, ...systems: ReturnType<typeof System>[]): App {
-    if (this.#started || this.#destroyed) return this;
-    systems.forEach((it) => this.#providedSystems.get(schedule).add(it));
+    if (this.#started || this.#destroyed) {
+      this.#logger.warn("Attempted to add a system to App, which is either running or destroyed")
+      return this;
+    }
+    systems.forEach((it) => {
+      this.#logger.info(`Registering system ${it.name}`)
+      this.#providedSystems.get(schedule).add(it)
+    });
     return this;
   }
 
   addResources(...resources: ConstructorOf<Object>[]): App {
-    if (this.#started || this.#destroyed) return this;
+    if (this.#started || this.#destroyed) {
+      this.#logger.warn("Attempted to add a resource to App, which is either running or destroyed")
+      return this;
+    }
     for (const r of resources) {
-      this.#resources.add(r)
+      this.#logger.info(`Registering resource ${r.name}`)
+      this.#resources.add(r);
     }
     return this;
   }
 
   addEvents(...events: Event<any>[]): App {
-    if (this.#started || this.#destroyed) return this;
+    if (this.#started || this.#destroyed) {
+      this.#logger.warn("Attempted to add an event to App, which is either running or destroyed")
+      return this;
+    }
     for (const e of events) {
       if (!this.#events.has(e)) {
+        this.#logger.info(`Registering event ${e}`)
         this.#events.set(e, new EventQueue());
+      } else {
+        this.#logger.warn(`Attempted to add an event (${e}) which was already added`)
       }
     }
     return this;
   }
 
   run(): App {
-    if (this.#started) return this;
+    if (this.#started) {
+      this.#logger.warn("Attempted to run an app which is already running")
+    }
 
     if (this.#destroyed) {
       throw Error(
-        "Attempted to run Application when it was previously destroyed",
+        "Attempted to run an app when it was previously destroyed",
       );
     }
 
-    const config = this.#resources.resolve(Configuration)
-
     assertInstanceOf(
-      config,
+      this.#config,
       Configuration,
-      `Configuration resource must exist and be instanceof Configuration`
-    )
+      `Configuration resource must exist and be instanceof Configuration`,
+    );
 
     assertInstanceOf(
       this.#resources.resolve(Clock),
       Clock,
-      `Clock resource must exist and be instanceof Clock`
-    )
+      `Clock resource must exist and be instanceof Clock`,
+    );
 
-    const triggerer = this.#resources.resolve(Triggerer)
+    const triggerer = this.#resources.resolve(Triggerer);
     assertInstanceOf(
       triggerer,
       Triggerer,
-      `Triggerer resource must exist and be instanceof Triggerer`
-    )
+      `Triggerer resource must exist and be instanceof Triggerer`,
+    );
 
-    const world = this.#resources.resolve(World)
+    const world = this.#resources.resolve(World);
     assertInstanceOf(
       world,
       World,
-      `World resource must exist and be instanceof World`
-    )
+      `World resource must exist and be instanceof World`,
+    );
 
-    world.triggerer = triggerer
+    world.triggerer = triggerer;
+
+    const logger = this.#logger
 
     this.#started = true;
+    logger.debug("Started app")
 
     try {
       for (const [schedule, systems] of this.#providedSystems) {
@@ -1068,81 +1204,94 @@ export class App {
       }
 
       for (const s of this.#systems.get(Schedule.PreStartup)) {
-        appLogger.debug("running system:", s.name)
+        logger.debug("running system:", s.name);
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
-          config.onSystemError(error)
+          this.#config.onSystemError(error);
           appLogger.critical(`Error in pre startup system ${s.name}: ${error}`);
           throw error;
         }
       }
 
       for (const s of this.#systems.get(Schedule.Startup)) {
-        appLogger.debug("running system:", s.name)
+        logger.debug("running system:", s.name);
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
-          config.onSystemError(error)
+          this.#config.onSystemError(error);
           appLogger.critical(`Error in startup system ${s.name}: ${error}`);
           throw error;
         }
       }
 
       for (const s of this.#systems.get(Schedule.PostStartup)) {
-        appLogger.debug("running system:", s.name)
+        logger.debug("running system:", s.name);
         try {
           s.callback.apply(null, s.args);
         } catch (error) {
-          config.onSystemError(error)
-          appLogger.critical(`Error in post startup system ${s.name}: ${error}`);
+          this.#config.onSystemError(error);
+          appLogger.critical(
+            `Error in post startup system ${s.name}: ${error}`,
+          );
           throw error;
         }
       }
-    } catch(error) {
-      this.#runSystems(Schedule.StartupError)
+    } catch (error) {
+      this.#runSystems(Schedule.StartupError);
       throw error;
     }
 
-    setTimeout(this.#update, 0)
+    setTimeout(this.#update, 0);
+
+    logger.success("App successfully started!")
 
     return this;
   }
 
   destroy() {
-    if (!this.#started) return;
+    if (!this.#started) {
+      this.#logger.warn(`Attempted to destroy an app which was not started. This may not be intended behavior.`)
+    }
     this.#runSystems(Schedule.Destroy);
     this.#started = false;
     this.#destroyed = true;
+    this.#logger.debug(`Destroyed app ${this}`)
+  }
+
+  get #logger() {
+    return this.#config.logger!
   }
 
   #update = () => {
+    const logger = this.#logger
 
-    const config = mustExist(
-      this.#resources.resolve(Configuration),
-      `Configuration resource does not exist.`
-    )
-
-    if (config.timeStep === 0) {
-      requestAnimationFrame(this.#update)
+    if (this.#config.timeStep === 0) {
+      requestAnimationFrame(this.#update);
     } else {
-      setTimeout(this.#update, config.timeStep);
+      setTimeout(this.#update, this.#config.timeStep);
     }
 
     // capture time
     const clock = this.#resources.resolve(Clock)!;
     clock.capture();
 
+    logger.debug(`running preupdate schedule`)
     this.#runSystems(Schedule.PreUpdate);
+    logger.debug(`running update schedule`)
     this.#runSystems(Schedule.Update);
+    logger.debug(`running postupdate schedule`)
     this.#runSystems(Schedule.PostUpdate);
 
     // flush world (remove queued components and entities)
     const world = this.#resources.resolve(World)!;
+    logger.debug("flushing world")
     this.#runSystems(Schedule.WorldFlush);
     world.flush();
+    world.clear();
 
     // update event queues
+    logger.debug("updating event queues")
     this.#runSystems(Schedule.EventUpdate);
     for (const queue of this.#events.values()) {
       queue.update();
@@ -1150,32 +1299,29 @@ export class App {
   };
 
   #runSystems(schedule: Schedule) {
-    const config = mustExist(
-      this.#resources.resolve(Configuration),
-      `Configuration resource does not exist.`
-    )
+    const logger = this.#logger
     for (const s of this.#systems.get(schedule)) {
-      appLogger.debug("running system:", s.name)
+      logger.debug("running system:", s.name);
       try {
         s.callback.apply(null, s.args);
       } catch (error) {
-        config.onSystemError(error)
-        if (config.throwOnSystemError) {
+        this.#config.onSystemError(error);
+        if (this.#config.throwOnSystemError) {
           throw error;
         } else {
-          appLogger.critical(`Error in system ${s.name}: ${error}`);
+          logger.critical(`Error in system ${s.name}: ${error}`);
         }
       }
     }
   }
 
-  #createSystemArgs(system: SystemBundle) {
+  #createSystemArgs(system: System) {
     const result = [];
 
     const world = mustExist(
       this.#resources.resolve(World),
       "World does not exist as Resource",
-    )
+    );
 
     for (const arg of system.args) {
       if (queryTag in arg) {
@@ -1211,6 +1357,7 @@ export class App {
       }
     }
 
+    this.#logger.debug(`created arguments for system ${system.name}: ${result}`)
     return result;
   }
 }

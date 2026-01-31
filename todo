@@ -1,9 +1,15 @@
 [x] - ECS change detection
     - [x] - add triggers
     - [x] - wire up to mutref
-[ ] - Asset system
 [x] - Verify event system
-[ ] - Add debug logging
+[x] - Add debug logging
+[x] - relationship system
+[x] - subtype Resources
+[ ] - Asset system
+[ ] - three.js integration
+    - [ ] renderer
+    - [ ] objects
+[ ] - audio resource
 [ ] - create simple build pipeline
     - [ ] - tsc
     - [ ] - esbuild
@@ -15,10 +21,3 @@
     - [x] object pool
     - [x] ECS
     - [ ] system
-[ ] - audio resource
-[ ] - three.js integration
-    - [ ] renderer
-    - [ ] objects
-[x] - relationship system
-[ ] - subtype Resources
-[ ] - ecs tag (or similar solution)
