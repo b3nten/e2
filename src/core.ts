@@ -144,6 +144,15 @@ export class Handle<T> {
     return (<any>this.#asset).data;
   }
 
+  mustGet(): T {
+    if (!this.initalized) {
+      throw Error(
+        `mustGet asset ${this.#asset.constructor.name}: not initalized`,
+      );
+    }
+    return (<any>this.#asset).data!;
+  }
+
   get initalized() {
     return this.#asset.initalized;
   }
@@ -223,6 +232,15 @@ export abstract class Asset<T> {
     const handle = new Handle(this);
     return handle;
   }
+}
+
+export class AssetManager {
+  load<T extends Asset<any>>(asset: T): Handle<T> {
+    asset.load();
+    return asset.getHandle();
+  }
+
+  batchLoad() {}
 }
 
 /* d88888b db    db d88888b d8b   db d888888b .d8888. */
@@ -396,8 +414,7 @@ type QueryList = readonly (ConstructorOf<Object> | MutParam<any>)[];
 
 const queryTag = Symbol.for("QueryTag");
 export function Query<T extends QueryList>(...values: T) {
-  // @ts-expect-error
-  values[queryTag] = true;
+  (<any>values)[queryTag] = true;
   return values;
 }
 
@@ -495,20 +512,132 @@ export class Triggerer {
 /* 88 `88. 88.     db   8D */
 /* 88   YD Y88888P `8888Y' */
 
-export class ResourceManager {
-  #instances = new Map<any, any>();
+type ResourcePtr<T = unknown> = {
+  data: T | undefined;
+  valid: boolean;
+  refCount: number;
+};
 
-  add<T extends object>(res: ConstructorOf<T>) {
-    const instance = new res();
-    let current: any = res;
-    while (current && current !== Object && current != Function.prototype) {
-      this.#instances.set(current, instance);
-      current = Object.getPrototypeOf(current);
+export class Resource<T = unknown> {
+  #ptr: ResourcePtr<T>;
+  #disposed = false;
+
+  private constructor(ptr: ResourcePtr<T>, disposalFn: VoidFunction) {
+    this.#ptr = ptr;
+    this.dispose = () => {
+      if (this.#disposed) {
+        return;
+      }
+      this.#disposed = true;
+      disposalFn();
+    };
+  }
+
+  get(): T {
+    if (this.#disposed) {
+      throw new Error("Resource handle has been disposed");
+    }
+    if (!this.#ptr.valid) {
+      throw new Error("Resource has been invalidated");
+    }
+    return this.#ptr.data!;
+  }
+
+  tryGet(): T | null {
+    if (!this.#ptr.valid || this.#disposed) {
+      return null;
+    }
+    return this.#ptr.data!;
+  }
+
+  unwrap() {
+    return this.#ptr.data;
+  }
+
+  readonly dispose: VoidFunction;
+}
+
+export class Resources {
+  #storage = new Map<any, ResourcePtr>();
+
+  #registry = new FinalizationRegistry<{ key: any; ptr: ResourcePtr }>(
+    (ctx) => {
+      this.#decrement(ctx.key, ctx.ptr);
+    },
+  );
+
+  add<T>(key: any, value: T): Resource<T> {
+    if (this.#storage.has(key)) {
+      const ptr = <ResourcePtr<T>>this.#storage.get(key);
+
+      try {
+        (ptr.data as any)?.destructor?.();
+      } catch (e) {}
+
+      ptr.data = value;
+      ptr.valid = true;
+
+      return this.#createResource(key, ptr);
+    }
+
+    const ptr: ResourcePtr<T> = { data: value, valid: true, refCount: 1 };
+    this.#storage.set(key, ptr);
+
+    return this.#createResource(key, ptr);
+  }
+
+  get<T = unknown>(key: any): Resource<T> {
+    const ptr = this.#storage.get(key);
+    if (!ptr) {
+      throw Error(`No Resource for key (${key}) available`);
+    }
+    ptr.refCount++;
+    return this.#createResource(key, <ResourcePtr<T>>ptr);
+  }
+
+  tryGet<T = unknown>(key: any): Resource<T> | null {
+    const ptr = this.#storage.get(key);
+    if (!ptr) {
+      return null;
+    }
+    ptr.refCount++;
+    return this.#createResource(key, <ResourcePtr<T>>ptr);
+  }
+
+  #createResource<T>(key: any, ptr: ResourcePtr<T>): Resource<T> {
+    const token = {};
+
+    // @ts-expect-error private constructor is module scoped
+    const resource = new Resource<T>(ptr, () => {
+      this.#registry.unregister(token);
+      this.#decrement(key, ptr);
+    });
+
+    this.#registry.register(resource, { key, ptr }, token);
+
+    return resource;
+  }
+
+  #decrement(key: any, ptr: ResourcePtr) {
+    ptr.refCount--;
+
+    if (ptr.refCount === 0) {
+      this.#destroy(ptr);
+      if (this.#storage.get(key) === ptr) {
+        this.#storage.delete(key);
+      }
     }
   }
 
-  resolve<T extends object>(res: ConstructorOf<T>): T | null {
-    return (this.#instances.get(res) as T) ?? null;
+  #destroy(ptr: ResourcePtr) {
+    if (!ptr.valid) return;
+
+    try {
+      (ptr.data as any)?.destructor?.();
+    } catch (e) {}
+
+    ptr.valid = false;
+    ptr.data = undefined;
   }
 }
 
@@ -964,12 +1093,11 @@ const relationshipSystem = System(
 /* 88      88booo. 88b  d88 88. ~8~   .88.   88  V888 */
 /* 88      Y88888P ~Y8888P'  Y888P  Y888888P VP   V8P */
 
-const pluginName = Symbol.for("PluginName")
-export type Plugin = (app: App) => void;
+const pluginName = Symbol.for("PluginName");
+export type Plugin = ((app: App) => void) & { [pluginName]?: string };
 export function Plugin(name: string, plugin: Plugin): Plugin {
-  // @ts-expect-error
-  plugin[pluginName] = name
-  return plugin
+  plugin[pluginName] = name;
+  return plugin;
 }
 
 /* .d8888. db    db .d8888. d888888b d88888b .88b  d88. */
@@ -1002,7 +1130,9 @@ type InferSystemArgs<T> = {
         ? EventReader<U>
         : T[K] extends InferEventWriter<infer U>
           ? EventWriter<U>
-          : never;
+          : T[K] extends Resources
+            ? Resources
+            : never;
 };
 
 type SystemCallback<T extends readonly any[] = []> = (
@@ -1057,13 +1187,14 @@ export class Configuration {
 }
 
 export class App {
-
-static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
+  static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
     app.addResources(Clock, Triggerer, World);
     app.addSystems(Schedule.Startup, relationshipSystem);
   });
 
-  static WithDefaults(config?: Configuration | ConstructorOf<Configuration>): App {
+  static WithDefaults(
+    config?: Configuration | ConstructorOf<Configuration>,
+  ): App {
     return new App(config).addPlugins(App.defaultsPlugin);
   }
 
@@ -1075,11 +1206,14 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
   #events = new Map<Event, EventQueue<any>>();
   #started = false;
   #destroyed = false;
-  #resources = new ResourceManager();
-  #config: Configuration
+  #resourceManager = new Resources();
+  #staticResources = new Map<ConstructorOf<Object>, Resource<Object>>();
+  #config: Configuration;
 
-  constructor(config: Configuration | ConstructorOf<Configuration>) {
-    this.#config = isConstructor(config) ? new config : config;
+  constructor(
+    config: Configuration | ConstructorOf<Configuration> = new Configuration(),
+  ) {
+    this.#config = isConstructor(config) ? new config() : config;
 
     // init logger using AppMode
     if (!this.#config.logger) {
@@ -1097,52 +1231,61 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
 
   addPlugins(...plugins: Plugin[]): App {
     if (this.#started || this.#destroyed) {
-      this.#logger.warn("Attempted to add a plugin to App, which is either running or destroyed")
+      this.#logger.warn(
+        "Attempted to add a plugin to App, which is either running or destroyed",
+      );
       return this;
     }
     plugins.forEach((it) => {
-      // @ts-expect-error
-      this.#logger.info(`Registering plugin ${it[pluginName] ?? "AnonPlugin"}`)
-      it(this)
+      this.#logger.info(`Registering plugin ${it[pluginName] ?? "AnonPlugin"}`);
+      it(this);
     });
     return this;
   }
 
   addSystems(schedule: Schedule, ...systems: ReturnType<typeof System>[]): App {
     if (this.#started || this.#destroyed) {
-      this.#logger.warn("Attempted to add a system to App, which is either running or destroyed")
+      this.#logger.warn(
+        "Attempted to add a system to App, which is either running or destroyed",
+      );
       return this;
     }
     systems.forEach((it) => {
-      this.#logger.info(`Registering system ${it.name}`)
-      this.#providedSystems.get(schedule).add(it)
+      this.#logger.info(`Registering system ${it.name}`);
+      this.#providedSystems.get(schedule).add(it);
     });
     return this;
   }
 
   addResources(...resources: ConstructorOf<Object>[]): App {
     if (this.#started || this.#destroyed) {
-      this.#logger.warn("Attempted to add a resource to App, which is either running or destroyed")
+      this.#logger.warn(
+        "Attempted to add a resource to App, which is either running or destroyed",
+      );
       return this;
     }
     for (const r of resources) {
-      this.#logger.info(`Registering resource ${r.name}`)
-      this.#resources.add(r);
+      this.#logger.info(`Registering resource ${r.name}`);
+      this.#staticResources.set(r, this.#resourceManager.add(r, new r()));
     }
     return this;
   }
 
   addEvents(...events: Event<any>[]): App {
     if (this.#started || this.#destroyed) {
-      this.#logger.warn("Attempted to add an event to App, which is either running or destroyed")
+      this.#logger.warn(
+        "Attempted to add an event to App, which is either running or destroyed",
+      );
       return this;
     }
     for (const e of events) {
       if (!this.#events.has(e)) {
-        this.#logger.info(`Registering event ${e}`)
+        this.#logger.info(`Registering event ${e}`);
         this.#events.set(e, new EventQueue());
       } else {
-        this.#logger.warn(`Attempted to add an event (${e}) which was already added`)
+        this.#logger.warn(
+          `Attempted to add an event (${e}) which was already added`,
+        );
       }
     }
     return this;
@@ -1150,13 +1293,11 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
 
   run(): App {
     if (this.#started) {
-      this.#logger.warn("Attempted to run an app which is already running")
+      this.#logger.warn("Attempted to run an app which is already running");
     }
 
     if (this.#destroyed) {
-      throw Error(
-        "Attempted to run an app when it was previously destroyed",
-      );
+      throw Error("Attempted to run an app when it was previously destroyed");
     }
 
     assertInstanceOf(
@@ -1166,19 +1307,19 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
     );
 
     assertInstanceOf(
-      this.#resources.resolve(Clock),
+      this.#staticResources.get(Clock)?.unwrap(),
       Clock,
       `Clock resource must exist and be instanceof Clock`,
     );
 
-    const triggerer = this.#resources.resolve(Triggerer);
+    const triggerer = this.#staticResources.get(Triggerer)?.unwrap();
     assertInstanceOf(
       triggerer,
       Triggerer,
       `Triggerer resource must exist and be instanceof Triggerer`,
     );
 
-    const world = this.#resources.resolve(World);
+    const world = this.#staticResources.get(World)?.unwrap();
     assertInstanceOf(
       world,
       World,
@@ -1187,10 +1328,10 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
 
     world.triggerer = triggerer;
 
-    const logger = this.#logger
+    const logger = this.#logger;
 
     this.#started = true;
-    logger.debug("Started app")
+    logger.debug("Started app");
 
     try {
       for (const [schedule, systems] of this.#providedSystems) {
@@ -1244,27 +1385,29 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
 
     setTimeout(this.#update, 0);
 
-    logger.success("App successfully started!")
+    logger.success("App successfully started!");
 
     return this;
   }
 
   destroy() {
     if (!this.#started) {
-      this.#logger.warn(`Attempted to destroy an app which was not started. This may not be intended behavior.`)
+      this.#logger.warn(
+        `Attempted to destroy an app which was not started. This may not be intended behavior.`,
+      );
     }
     this.#runSystems(Schedule.Destroy);
     this.#started = false;
     this.#destroyed = true;
-    this.#logger.debug(`Destroyed app ${this}`)
+    this.#logger.debug(`Destroyed app ${this}`);
   }
 
   get #logger() {
-    return this.#config.logger!
+    return this.#config.logger!;
   }
 
   #update = () => {
-    const logger = this.#logger
+    const logger = this.#logger;
 
     if (this.#config.timeStep === 0) {
       requestAnimationFrame(this.#update);
@@ -1273,25 +1416,25 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
     }
 
     // capture time
-    const clock = this.#resources.resolve(Clock)!;
+    const clock = <Clock>this.#staticResources.get(Clock)!.unwrap();
     clock.capture();
 
-    logger.debug(`running preupdate schedule`)
+    logger.debug(`running preupdate schedule`);
     this.#runSystems(Schedule.PreUpdate);
-    logger.debug(`running update schedule`)
+    logger.debug(`running update schedule`);
     this.#runSystems(Schedule.Update);
-    logger.debug(`running postupdate schedule`)
+    logger.debug(`running postupdate schedule`);
     this.#runSystems(Schedule.PostUpdate);
 
     // flush world (remove queued components and entities)
-    const world = this.#resources.resolve(World)!;
-    logger.debug("flushing world")
+    const world = <World>this.#staticResources.get(World)!.unwrap();
+    logger.debug("flushing world");
     this.#runSystems(Schedule.WorldFlush);
     world.flush();
     world.clear();
 
     // update event queues
-    logger.debug("updating event queues")
+    logger.debug("updating event queues");
     this.#runSystems(Schedule.EventUpdate);
     for (const queue of this.#events.values()) {
       queue.update();
@@ -1299,7 +1442,7 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
   };
 
   #runSystems(schedule: Schedule) {
-    const logger = this.#logger
+    const logger = this.#logger;
     for (const s of this.#systems.get(schedule)) {
       logger.debug("running system:", s.name);
       try {
@@ -1319,12 +1462,14 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
     const result = [];
 
     const world = mustExist(
-      this.#resources.resolve(World),
+      <World>this.#staticResources.get(World)!.unwrap(),
       "World does not exist as Resource",
     );
 
     for (const arg of system.args) {
-      if (queryTag in arg) {
+      if (arg === Resources) {
+        result.push(this.#resourceManager);
+      } else if (queryTag in arg) {
         result.push({
           [Symbol.iterator]() {
             return world.queryIter(arg);
@@ -1347,7 +1492,7 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
         }
         result.push(queue.getWriter());
       } else {
-        const res = this.#resources.resolve(arg);
+        const res = this.#resourceManager.tryGet(arg)?.tryGet();
         if (!res) {
           throw Error(
             `Could not resolve argument ${arg.name} for system ${system.name}.`,
@@ -1357,7 +1502,9 @@ static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
       }
     }
 
-    this.#logger.debug(`created arguments for system ${system.name}: ${result}`)
+    this.#logger.debug(
+      `created arguments for system ${system.name}: ${result}`,
+    );
     return result;
   }
 }

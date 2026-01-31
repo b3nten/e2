@@ -26,9 +26,8 @@ import {
   ComponentInserted,
   Configuration,
   AppMode,
-
+  Resources,
 } from "./core.ts";
-import { Logger } from "./lib.ts";
 
 const TestEvent = Event<string>("testEvent");
 
@@ -37,7 +36,7 @@ class Foo {
 }
 class Bar { }
 
-App.WithDefaults(class extends Configuration { mode = AppMode.Debug })
+App.WithDefaults(class extends Configuration { mode = AppMode.Dev })
   .addEvents(TestEvent)
   .addSystems(
     Schedule.Startup,
@@ -65,8 +64,8 @@ App.WithDefaults(class extends Configuration { mode = AppMode.Debug })
   )
   .addSystems(
     Schedule.WorldFlush,
-    System("Test", [Clock, World, Query(Bar, Mut(Foo))], (c, w, query) => {
-      // console.log(w.changedComponents.get(Foo));
+    System("Test", [Clock, World, Query(Bar, Mut(Foo)), Resources], (c, w, query, res) => {
+      console.log(w.changedComponents.get(Foo));
     }),
   )
   .run();
