@@ -2083,7 +2083,7 @@ export class CompositeMap<T> {
 }
 
 class EmptySet extends Set<any> {
-  add(value: any): this {
+  override add(value: any): this {
     return this;
   }
 }
