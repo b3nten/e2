@@ -144,132 +144,137 @@ export class Handle<T> {
   }
 
   get pending() {
-    return this.#asset.tryGet()?.pending ?? false
+    return this.#asset.tryGet()?.pending ?? false;
   }
 
   get promise() {
-    return this.#asset.tryGet()?.promise ?? Promise.reject(Err("Disposed"))
+    return this.#asset.tryGet()?.promise ?? Promise.reject(Err("Disposed"));
   }
 
   get error() {
-    const data = this.#asset.tryGet()?.data
-    if (data?.ok) return null
-    else return data?.error
+    const data = this.#asset.tryGet()?.data;
+    if (data?.ok) return null;
+    else return data?.error;
   }
 
   get ready() {
-    const a = this.#asset.tryGet()
-    return a?.data?.ok ?? false
+    const a = this.#asset.tryGet();
+    return a?.data?.ok ?? false;
   }
 
   get ptr(): Readonly<AssetInstance<T>> | null {
-    return this.#asset.tryGet()
+    return this.#asset.tryGet();
   }
 
   get() {
-    const a = this.#asset.get()
+    const a = this.#asset.get();
     if (a.pending) {
-      throw Error("Asset is pending")
+      throw Error("Asset is pending");
     }
     if (!a.data?.ok) {
-      throw Error("Asset has errored")
+      throw Error("Asset has errored");
     }
-    return a.data.value
+    return a.data.value;
   }
 
   tryGet() {
-    const a = this.#asset.get()
+    const a = this.#asset.get();
     if (a.pending || !a.data?.ok) {
-      return null
+      return null;
     }
-    return a.data.value
+    return a.data.value;
   }
 
   dispose() {
-    this.#asset.dispose()
+    this.#asset.dispose();
   }
 
-  #asset: Res<AssetInstance<T>>
+  #asset: Res<AssetInstance<T>>;
 }
 
 export interface AssetType<T extends any = unknown> {
-  path: string
-  load(signal: AbortSignal): Promise<T>
-  destroy?(instance: T): void
+  path: string;
+  load(signal: AbortSignal): Promise<T>;
+  destroy?(instance: T): void;
 }
 
 type AssetInstance<T> = {
-  data: Result<T> | null
-  promise: Promise<Result<T>>
-  pending: boolean
-  controller: AbortController
-  type: AssetType
-}
+  data: Result<T> | null;
+  promise: Promise<Result<T>>;
+  pending: boolean;
+  controller: AbortController;
+  type: AssetType;
+};
 
 export class Assets {
-  #resources = new Resources;
+  #resources = new Resources();
 
   load<T>(asset: AssetType<T>): Handle<T> {
-    return new Handle(this.#resources.add(
-      asset.path,
-      this.#load(asset, this.#resources.tryGet<AssetInstance<T>>(asset.path))
-    ))
+    return new Handle(
+      this.#resources.add(
+        asset.path,
+        this.#load(asset, this.#resources.tryGet<AssetInstance<T>>(asset.path)),
+      ),
+    );
   }
 
   getOrLoad<T>(asset: AssetType<T>): Handle<T> {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path)
-    if (instance) return new Handle(instance)
+    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
+    if (instance) return new Handle(instance);
 
-    return new Handle(this.#resources.add(
-      asset.path,
-      this.#load(asset, null)
-    ))
+    return new Handle(this.#resources.add(asset.path, this.#load(asset, null)));
   }
 
   get<T>(asset: AssetType<T>): Handle<T> {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path)
-    if (!instance) throw Error(`Asset ${asset.path} does not exist`)
-    return new Handle(instance)
+    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
+    if (!instance) throw Error(`Asset ${asset.path} does not exist`);
+    return new Handle(instance);
   }
 
   tryGet<T>(asset: AssetType<T>): Handle<T> | null {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path)
-    if (!instance) return null
-    return new Handle(instance)
+    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
+    if (!instance) return null;
+    return new Handle(instance);
   }
 
   clone<T>(handle: Handle<T>): Handle<T> {
-    return this.get(handle.ptr!.type) as Handle<T>
+    return this.get(handle.ptr!.type) as Handle<T>;
   }
 
-  #load<T>(asset: AssetType<T>, oldRes: Res<AssetInstance<T>> | null): AssetInstance<T> {
+  #load<T>(
+    asset: AssetType<T>,
+    oldRes: Res<AssetInstance<T>> | null,
+  ): AssetInstance<T> {
     const old = oldRes?.tryGet();
 
     if (old?.pending) {
-      old.controller.abort()
+      old.controller.abort();
     }
 
-    const assetInstance: Omit<AssetInstance<T>, "promise"> & Partial<AssetInstance<T>> = {
+    const assetInstance: Omit<AssetInstance<T>, "promise"> &
+      Partial<AssetInstance<T>> = {
       data: old?.data ?? null,
       pending: true,
-      controller: new AbortController,
+      controller: new AbortController(),
       type: asset,
-    }
+    };
 
     assetInstance.promise = runCatching(async () => {
-      const data = await asset.load(assetInstance.controller.signal)
+      const data = await asset.load(assetInstance.controller.signal);
       if (assetInstance.controller.signal.aborted) {
-        throw Error("Aborted")
+        throw Error("Aborted");
       }
       if (old?.data?.ok) {
-        try { asset.destroy?.(old.data.value) } catch { }
+        try {
+          asset.destroy?.(old.data.value);
+        } catch {}
       }
-      return data
+      return data;
     }).finally(() => {
       assetInstance.pending = false;
-    })
+    });
 
-    return <AssetInstance<T>>assetInstance
+    return <AssetInstance<T>>assetInstance;
   }
 }
 
@@ -426,7 +431,7 @@ class MutRef<T> {
   }
 
   deref(): T {
-    this.world.markChanged(this.value!)
+    this.world.markChanged(this.value!);
     return this.value;
   }
 
@@ -462,7 +467,15 @@ type InferQuery<T extends QueryList> = {
 /*    YP    88   YD Y888888P  Y888P   Y888P  Y88888P 88   YD */
 
 type TriggerResponder<T extends readonly ConstructorOf<Object>[] = []> = (
-  ...args: { [K in keyof T]: InstanceOf<T[K]> }
+  ...args: {
+    [K in keyof T]: T[K] extends NumberConstructor
+      ? number
+      : T[K] extends StringConstructor
+        ? string
+        : T[K] extends BooleanConstructor
+          ? boolean
+          : InstanceOf<T[K]>;
+  }
 ) => void;
 
 type TriggererStorage = {
@@ -550,12 +563,12 @@ type ResPtr<T = unknown> = {
 export class Res<T = unknown> {
   #ptr: ResPtr<T>;
   #disposed = false;
-  #res: Resources
+  #res: Resources;
 
   private constructor(
     res: Resources,
     ptr: ResPtr<T>,
-    disposalFn: VoidFunction
+    disposalFn: VoidFunction,
   ) {
     this.#ptr = ptr;
     this.#res = res;
@@ -586,29 +599,27 @@ export class Res<T = unknown> {
   }
 
   unwrap(): T | null {
-    return this.#ptr.data ?? null
+    return this.#ptr.data ?? null;
   }
 
   clone(): Res<T> {
-    return this.#res.clone(this)
+    return this.#res.clone(this);
   }
 
   /** @internal */
   get ptr(): Readonly<ResPtr<T>> {
-    return this.#ptr
+    return this.#ptr;
   }
 
   readonly dispose: VoidFunction;
 }
 
 export class Resources {
-  #storage = new Map<any, ResPtr>;
+  #storage = new Map<any, ResPtr>();
 
-  #registry = new FinalizationRegistry<{ key: any; ptr: ResPtr }>(
-    (ctx) => {
-      this.#decrement(ctx.key, ctx.ptr);
-    },
-  );
+  #registry = new FinalizationRegistry<{ key: any; ptr: ResPtr }>((ctx) => {
+    this.#decrement(ctx.key, ctx.ptr);
+  });
 
   add<T>(key: any, value: T): Res<T> {
     if (this.#storage.has(key)) {
@@ -649,11 +660,11 @@ export class Resources {
   }
 
   clone<T>(res: Res<T>): Res<T> {
-    return this.get<T>(res.ptr.key)
+    return this.get<T>(res.ptr.key);
   }
 
   unwrap<T = unknown>(key: any) {
-    return this.#storage.get(key)
+    return this.#storage.get(key);
   }
 
   #createResource<T>(key: any, ptr: ResPtr<T>): Res<T> {
@@ -701,6 +712,7 @@ export class Resources {
 /* Y88888P VP   V8P    YP    Y888888P    YP       YP    */
 
 export type EntityID = number;
+export const Entity = Number;
 export const entityIDField = Symbol.for("ECS::EntityIDField");
 export const currentEntity = Symbol.for("CurrentEntity");
 
@@ -712,60 +724,54 @@ export const currentEntity = Symbol.for("CurrentEntity");
 /*  `8b8' `8d8'   `Y88P'  88   YD Y88888P Y8888D' */
 
 // trigger keys
-export class ComponentInserted {
-  constructor(public entity: EntityID) {}
-}
-export class ComponentRemovalScheduled {
-  constructor(public entity: EntityID) {}
-}
-export class EntitySpawned {
-  constructor(public entity: EntityID) {}
-}
-export class EntityDespawnScheduled {
-  constructor(public entity: EntityID) {}
-}
+export class ComponentInserted {}
+const componentInserted = new ComponentInserted();
+export class ComponentRemovalScheduled {}
+const componentRemovalScheduled = new ComponentRemovalScheduled();
+export class EntitySpawned {}
+const entitySpawned = new EntitySpawned();
+export class EntityDespawnScheduled {}
+const entityDespawnScheduled = new EntityDespawnScheduled();
 
-type ReadonlySet<T> = Omit<Set<T>, "add" | "clear" | "delete">
+type ReadonlySet<T> = Omit<Set<T>, "add" | "clear" | "delete">;
 
 class MutatedComponentListImpl {
-
-  #storage = new Map<Object, Set<Object>>;
+  #storage = new Map<Object, Set<Object>>();
 
   add(component: Object) {
     if (!this.#storage.has(ConstructorOf(component))) {
-      this.#storage.set(ConstructorOf(component), new Set)
+      this.#storage.set(ConstructorOf(component), new Set());
     }
-    this.#storage.get(ConstructorOf(component))?.add(component)
+    this.#storage.get(ConstructorOf(component))?.add(component);
   }
 
   clear() {
     for (const set of this.#storage.values()) {
-      set.clear()
+      set.clear();
     }
   }
 
   ofType<T extends Object>(componentType: ConstructorOf<T>): ReadonlySet<T> {
-    return this.#storage.get(componentType) ?? EMPTY_SET
+    return this.#storage.get(componentType) ?? EMPTY_SET;
   }
 
   iter() {
-    return this[Symbol.iterator]()
+    return this[Symbol.iterator]();
   }
 
   *[Symbol.iterator](): IterableIterator<Object> {
     for (const s of this.#storage.values()) {
       for (const c of s) {
-        yield c
+        yield c;
       }
     }
   }
-
 }
 
-type MutatedComponentList = Omit<MutatedComponentListImpl, "add" | "clear">
+type MutatedComponentList = Omit<MutatedComponentListImpl, "add" | "clear">;
 
 export class World {
-  #mutatedComponentList = new MutatedComponentListImpl;
+  #mutatedComponentList = new MutatedComponentListImpl();
   #entityCount = 0;
   #entities: Set<EntityID> = new Set();
   #componentMap: AutoMap<ConstructorOf<Object>, SparseSet<Object>> =
@@ -778,7 +784,7 @@ export class World {
   #mutWrappers = Array.from({ length: 100 }).map(() => new MutRef(this));
 
   get mutatedComponentList(): MutatedComponentList {
-    return this.#mutatedComponentList
+    return this.#mutatedComponentList;
   }
 
   public triggerer?: Triggerer;
@@ -786,7 +792,7 @@ export class World {
   spawn(...components: Object[]): EntityID {
     const entity = ++this.#entityCount;
     this.#entities.add(entity);
-    this.triggerer?.trigger(new EntitySpawned(entity));
+    this.triggerer?.trigger(entitySpawned, entity);
     for (const c of components) {
       this.insert(entity, c);
     }
@@ -801,7 +807,7 @@ export class World {
     }
     entities.forEach((it) => {
       this.#despawnQueue.add(it);
-      this.triggerer?.trigger(new EntityDespawnScheduled(it));
+      this.triggerer?.trigger(entityDespawnScheduled, it);
     });
   }
 
@@ -832,7 +838,7 @@ export class World {
 
       (<any>component)[currentEntity] = entity;
       this.#componentMap.get(ConstructorOf(component)).add(entity, component);
-      this.triggerer?.trigger(new ComponentInserted(entity), component);
+      this.triggerer?.trigger(componentInserted, component);
     }
   }
 
@@ -852,7 +858,7 @@ export class World {
 
     for (const component of components) {
       this.#removalQueue.get(component).add(entity);
-      this.triggerer?.trigger(new ComponentRemovalScheduled(entity), component);
+      this.triggerer?.trigger(componentRemovalScheduled, component);
     }
   }
 
@@ -906,7 +912,7 @@ export class World {
       throw Error(`Component ${componentType.name} does not exist on entity`);
     }
     const component = <T>this.#componentMap.get(componentType).get(entity);
-    this.#mutatedComponentList.get(componentType).add(component);
+    this.#mutatedComponentList.add(component);
     return component;
   }
 
@@ -918,7 +924,7 @@ export class World {
       return null;
     }
     const component = <T>this.#componentMap.get(componentType).get(entity);
-    this.#mutatedComponentList.get(componentType).add(component);
+    this.#mutatedComponentList.add(component);
     return component;
   }
 
@@ -935,13 +941,13 @@ export class World {
     }
 
     const component = this.#componentMap.get(componentType).get(from)!;
-    this.triggerer?.trigger(new ComponentRemovalScheduled(from), component);
+    this.triggerer?.trigger(componentRemovalScheduled, from, component);
 
     (<any>component)[currentEntity] = to;
     this.#componentMap.get(componentType).remove(from);
     this.#componentMap.get(componentType).add(to, component);
 
-    this.triggerer?.trigger(new ComponentInserted(to), component);
+    this.triggerer?.trigger(componentInserted, component);
   }
 
   trySwap<T extends Object>(
@@ -954,13 +960,13 @@ export class World {
     }
 
     const component = this.#componentMap.get(componentType).get(from)!;
-    this.triggerer?.trigger(new ComponentRemovalScheduled(from), component);
+    this.triggerer?.trigger(componentRemovalScheduled, from, component);
 
     (<any>component)[currentEntity] = to;
 
     this.#componentMap.get(componentType).remove(from);
     this.#componentMap.get(componentType).add(to, component);
-    this.triggerer?.trigger(new ComponentInserted(to), component);
+    this.triggerer?.trigger(componentInserted, component);
 
     return true;
   }
@@ -975,20 +981,20 @@ export class World {
 
   getEntity(component: Object): EntityID {
     if (entityIDField in component && component[entityIDField]) {
-      return <EntityID>component[entityIDField]
+      return <EntityID>component[entityIDField];
     }
-    throw Error(`Object is not component in World`)
+    throw Error(`Object is not component in World`);
   }
 
   tryGetEntity(component: Object): EntityID | null {
     if (entityIDField in component && component[entityIDField]) {
-      return <EntityID>component[entityIDField]
+      return <EntityID>component[entityIDField];
     }
-    return null
+    return null;
   }
 
   markChanged(component: Object) {
-    this.#mutatedComponentList.add(component)
+    this.#mutatedComponentList.add(component);
   }
 
   flush() {
@@ -1015,7 +1021,7 @@ export class World {
   }
 
   clear() {
-    this.#mutatedComponentList.clear()
+    this.#mutatedComponentList.clear();
   }
 
   *queryIter<T extends QueryList>(
@@ -1172,8 +1178,8 @@ const relationshipSystem = System(
   [World, Triggerer],
   (w, t) => {
     t.addResponder(
-      [ComponentRemovalScheduled, Relationship],
-      ({ entity }, rel) => {
+      [ComponentRemovalScheduled, Entity, Relationship],
+      (_, entity, rel) => {
         if (rel.parent) {
           Relationship.Unparent(w, rel.parent, entity);
         }
@@ -1182,9 +1188,10 @@ const relationshipSystem = System(
         }
       },
     );
+
     t.addResponder(
-      [EntityDespawnScheduled, Relationship],
-      ({ entity }, rel) => {
+      [EntityDespawnScheduled, Entity, Relationship],
+      (_, entity, rel) => {
         if (rel.parent) {
           Relationship.Unparent(w, rel.parent, entity);
         }
@@ -1297,7 +1304,6 @@ export class Configuration {
 }
 
 export class App {
-
   static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
     app.addResources(Clock, Triggerer, World, Assets);
     app.addSystems(Schedule.Startup, relationshipSystem);
