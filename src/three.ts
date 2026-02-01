@@ -231,11 +231,28 @@ export const threeObjectSyncSystem = System(
   },
 );
 
+/*
+
+  Three.Renderer ??
+  Canvas -> ThreeData ?
+  Scene -> ThreeData ?
+  Camera -> World
+
+  render func
+
+  update camera
+  update renderer with dimensions (from canvas)
+  viewport dimensions??
+
+*/
+
 // poststartup
 export const threeRenderSystemInit = System(
   "Three::RenderSystem::Init",
   [ThreeData],
-  (threeData) => {},
+  (threeData) => {
+
+  },
 );
 
 // postupdate

@@ -1,11 +1,13 @@
 import { assertEquals, assert, assertExists, assertThrows, } from "jsr:@std/assert";
 import {
+  Query,
+} from "./core.ts";
+import {
   Event,
   EventQueue,
   EvReader,
   EvWriter,
-  Query,
-} from "./core.ts";
+} from "./lib.ts"
 import { World, Mut } from "./core.ts";
 
 const PingEvent = Event<{ id: number; msg: string }>("Ping");

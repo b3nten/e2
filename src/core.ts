@@ -34,31 +34,37 @@ This module forms the core of Elysiatech. Documentation coming soon.
 _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
 import {
-  appLogger,
+  type Immutable,
+  type InstanceOf,
   assertInstanceOf,
+  Assets,
   AutoMap,
-  cast,
   ConstructorOf,
-  Err,
-  Immutable,
-  InstanceOf,
+  Event,
+  EventQueue,
+  EventReader,
+  eventReaderTag,
+  EventWriter,
+  eventWriterTag,
   isConstructor,
   logColors,
   Logger,
   LogLevel,
   mustExist,
   noop,
-  Result,
-  runCatching,
+  Res,
+  Resources,
   SparseSet,
+  Triggerer,
+  Clock
 } from "./lib.ts";
 
-/* .d8888.  .o88b. db   db d88888b d8888b. db    db db      d88888b .d8888. */
-/* 88'  YP d8P  Y8 88   88 88'     88  `8D 88    88 88      88'     88'  YP */
-/* `8bo.   8P      88ooo88 88ooooo 88   88 88    88 88      88ooooo `8bo.   */
-/*   `Y8b. 8b      88~~~88 88~~~~~ 88   88 88    88 88      88~~~~~   `Y8b. */
-/* db   8D Y8b  d8 88   88 88.     88  .8D 88b  d88 88booo. 88.     db   8D */
-/* `8888Y'  `Y88P' YP   YP Y88888P Y8888D' ~Y8888P' Y88888P Y88888P `8888Y' */
+/* .d8888.  .o88b. db   db d88888b d8888b. db    db db      d88888b  */
+/* 88'  YP d8P  Y8 88   88 88'     88  `8D 88    88 88      88'      */
+/* `8bo.   8P      88ooo88 88ooooo 88   88 88    88 88      88ooooo  */
+/*   `Y8b. 8b      88~~~88 88~~~~~ 88   88 88    88 88      88~~~~~  */
+/* db   8D Y8b  d8 88   88 88.     88  .8D 88b  d88 88booo. 88.      */
+/* `8888Y'  `Y88P' YP   YP Y88888P Y8888D' ~Y8888P' Y88888P Y88888P  */
 
 export enum Schedule {
   PreStartup = "PreStartup",
@@ -89,326 +95,17 @@ export enum Schedule {
   Destroy = "Destroy",
 }
 
-/*  .o88b. db       .d88b.   .o88b. db   dD */
-/* d8P  Y8 88      .8P  Y8. d8P  Y8 88 ,8P' */
-/* 8P      88      88    88 8P      88,8P   */
-/* 8b      88      88    88 8b      88`8b   */
-/* Y8b  d8 88booo. `8b  d8' Y8b  d8 88 `88. */
-/*  `Y88P' Y88888P  `Y88P'   `Y88P' YP   YD */
+/* d88888b d8b   db d888888b d888888b d888888b db    db */
+/* 88'     888o  88 `~~88~~'   `88'   `~~88~~' `8b  d8' */
+/* 88ooooo 88V8o 88    88       88       88     `8bd8'  */
+/* 88~~~~~ 88 V8o88    88       88       88       88    */
+/* 88.     88  V888    88      .88.      88       88    */
+/* Y88888P VP   V8P    YP    Y888888P    YP       YP    */
 
-export class Clock {
-  #started = false;
-  #now = 0;
-  #last = 0;
-  #delta = 0.016;
-  #elapsed = 0;
-
-  get delta() {
-    return this.#delta;
-  }
-
-  get elapsed() {
-    return this.#elapsed;
-  }
-
-  capture() {
-    if (!this.#started) {
-      this.#started = true;
-      this.#now = performance.now();
-      this.#last = this.#now;
-      return;
-    }
-
-    this.#now = performance.now();
-
-    this.#delta = Math.max(
-      0.00001,
-      Math.min((this.#now - this.#last) / 1000, 0.06),
-    );
-
-    this.#elapsed += this.#delta;
-    this.#last = this.#now;
-  }
-}
-
-/*  .d8b.  .d8888. .d8888. d88888b d888888b */
-/* d8' `8b 88'  YP 88'  YP 88'     `~~88~~' */
-/* 88ooo88 `8bo.   `8bo.   88ooooo    88    */
-/* 88~~~88   `Y8b.   `Y8b. 88~~~~~    88    */
-/* 88   88 db   8D db   8D 88.        88    */
-/* YP   YP `8888Y' `8888Y' Y88888P    YP    */
-
-export class Handle<T> {
-  constructor(asset: Res<AssetInstance<T>>) {
-    this.#asset = asset;
-  }
-
-  get pending() {
-    return this.#asset.tryDeref()?.pending ?? false;
-  }
-
-  get promise() {
-    return this.#asset.tryDeref()?.promise ?? Promise.reject(Err("Disposed"));
-  }
-
-  get error() {
-    const data = this.#asset.tryDeref()?.data;
-    if (data?.ok) return null;
-    else return data?.error;
-  }
-
-  get ready() {
-    const a = this.#asset.tryDeref();
-    return a?.data?.ok ?? false;
-  }
-
-  get ptr(): Readonly<AssetInstance<T>> | null {
-    return this.#asset.tryDeref();
-  }
-
-  get() {
-    const a = this.#asset.deref();
-    if (a.pending) {
-      throw Error("Asset is pending");
-    }
-    if (!a.data?.ok) {
-      throw Error("Asset has errored");
-    }
-    return a.data.value;
-  }
-
-  tryGet() {
-    const a = this.#asset.deref();
-    if (a.pending || !a.data?.ok) {
-      return null;
-    }
-    return a.data.value;
-  }
-
-  dispose() {
-    this.#asset.dispose();
-  }
-
-  #asset: Res<AssetInstance<T>>;
-}
-
-export interface AssetType<T extends any = unknown> {
-  path: string;
-  load(signal: AbortSignal): Promise<T>;
-  destroy?(instance: T): void;
-}
-
-type AssetInstance<T> = {
-  data: Result<T> | null;
-  promise: Promise<Result<T>>;
-  pending: boolean;
-  controller: AbortController;
-  type: AssetType;
-};
-
-export class Assets {
-  #resources = new Resources();
-
-  load<T>(asset: AssetType<T>): Handle<T> {
-    return new Handle(
-      this.#resources.add(
-        asset.path,
-        this.#load(asset, this.#resources.tryGet<AssetInstance<T>>(asset.path)),
-      ),
-    );
-  }
-
-  getOrLoad<T>(asset: AssetType<T>): Handle<T> {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
-    if (instance) return new Handle(instance);
-
-    return new Handle(
-      this.#resources.add(asset.path, this.#load(asset, null)),
-    );
-  }
-
-  get<T>(asset: AssetType<T>): Handle<T> {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
-    if (!instance) throw Error(`Asset ${asset.path} does not exist`);
-    return new Handle(instance);
-  }
-
-  tryGet<T>(asset: AssetType<T>): Handle<T> | null {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
-    if (!instance) return null;
-    return new Handle(instance);
-  }
-
-  clone<T>(handle: Handle<T>): Handle<T> {
-    return this.get(handle.ptr!.type) as Handle<T>;
-  }
-
-  #load<T>(
-    asset: AssetType<T>,
-    oldRes: Res<AssetInstance<T>> | null,
-  ): AssetInstance<T> {
-    const old = oldRes?.tryDeref();
-
-    if (old?.pending) {
-      old.controller.abort();
-    }
-
-    const assetInstance: Omit<AssetInstance<T>, "promise"> &
-      Partial<AssetInstance<T>> = {
-      data: old?.data ?? null,
-      pending: true,
-      controller: new AbortController(),
-      type: asset,
-    };
-
-    assetInstance.promise = runCatching(async () => {
-      const data = await asset.load(assetInstance.controller.signal);
-      if (assetInstance.controller.signal.aborted) {
-        throw Error("Aborted");
-      }
-      if (old?.data?.ok) {
-        try {
-          asset.destroy?.(old.data.value);
-        } catch {}
-      }
-      return data;
-    }).finally(() => {
-      assetInstance.pending = false;
-    });
-
-    return <AssetInstance<T>>assetInstance;
-  }
-}
-
-/* d88888b db    db d88888b d8b   db d888888b .d8888. */
-/* 88'     88    88 88'     888o  88 `~~88~~' 88'  YP */
-/* 88ooooo Y8    8P 88ooooo 88V8o 88    88    `8bo.   */
-/* 88~~~~~ `8b  d8' 88~~~~~ 88 V8o88    88      `Y8b. */
-/* 88.      `8bd8'  88.     88  V888    88    db   8D */
-/* Y88888P    YP    Y88888P VP   V8P    YP    `8888Y' */
-
-export type Event<T = void> = string & {
-  /** @internal @private */ typeof: T;
-};
-
-export function Event<T = void>(name: string) {
-  return name as Event<T>;
-}
-
-export type EventData<T extends Event> = T["typeof"];
-
-const eventWriterTag = Symbol.for("EventWriterTag");
-export function EvWriter<T extends Event<any>>(event: T) {
-  return { [eventWriterTag]: true, event };
-}
-
-const eventReaderTag = Symbol.for("EventReaderTag");
-export function EvReader<T extends Event<any>>(event: T) {
-  return { [eventReaderTag]: true, event };
-}
-
-export class EventReader<T extends Event> {
-  #queue: WeakRef<EventQueue<T>>;
-  #currentIndex = 0;
-  #previousIndex = 0;
-
-  constructor(queue: EventQueue<T>) {
-    this.#queue = new WeakRef(queue);
-  }
-
-  get active() {
-    return !!this.#queue.deref();
-  }
-
-  *[Symbol.iterator]() {
-    const q = this.#queue.deref();
-    if (!q) return;
-
-    while (this.#previousIndex < q.previousBuffer.length) {
-      const val = q.previousBuffer[this.#previousIndex];
-      this.#previousIndex++;
-      yield val;
-    }
-
-    while (this.#currentIndex < q.currentBuffer.length) {
-      const val = q.currentBuffer[this.#currentIndex];
-      this.#currentIndex++;
-      yield val;
-    }
-  }
-
-  length(): number {
-    const q = this.#queue.deref();
-    if (!q) return 0;
-
-    const unreadPrevious = q.previousBuffer.length - this.#previousIndex;
-    const unreadCurrent = q.currentBuffer.length - this.#currentIndex;
-    return unreadPrevious + unreadCurrent;
-  }
-
-  /** @internal */
-  resetForNewFrame() {
-    this.#previousIndex = this.#currentIndex;
-    this.#currentIndex = 0;
-  }
-}
-
-export class EventWriter<T extends Event> {
-  #queue: WeakRef<EventQueue<T>>;
-
-  constructor(queue: EventQueue<T>) {
-    this.#queue = new WeakRef(queue);
-  }
-
-  get active() {
-    return !!this.#queue.deref();
-  }
-
-  write(payload: EventData<T>) {
-    const q = this.#queue.deref();
-    if (q) {
-      q.currentBuffer.push(payload);
-    }
-  }
-}
-
-export class EventQueue<T extends Event<any>> {
-  #currentBuffer: Array<T["typeof"]> = [];
-  #previousBuffer: Array<T["typeof"]> = [];
-  #readers = new Set<WeakRef<EventReader<T>>>();
-
-  get currentBuffer() {
-    return this.#currentBuffer;
-  }
-
-  get previousBuffer() {
-    return this.#previousBuffer;
-  }
-
-  getReader(): EventReader<T> {
-    const reader = new EventReader(this);
-    this.#readers.add(new WeakRef(reader));
-    return reader;
-  }
-
-  getWriter(): EventWriter<T> {
-    return new EventWriter(this);
-  }
-
-  update() {
-    for (const ref of this.#readers) {
-      const reader = ref.deref();
-      if (!reader) {
-        this.#readers.delete(ref);
-      } else {
-        reader.resetForNewFrame();
-      }
-    }
-
-    this.#previousBuffer = this.#currentBuffer;
-    this.#currentBuffer = [];
-  }
-}
+export type EntityID = number;
+export const Entity = Number;
+export const entityIDField = Symbol.for("ECS::EntityIDField");
+export const currentEntity = Symbol.for("CurrentEntity");
 
 /*  .d88b.  db    db d88888b d8888b. db    db */
 /* .8P  Y8. 88    88 88'     88  `8D `8b  d8' */
@@ -461,298 +158,54 @@ type InferQuery<T extends QueryList> = {
       : never;
 };
 
-/* d888888b d8888b. d888888b  d888b   d888b  d88888b d8888b. */
-/* `~~88~~' 88  `8D   `88'   88' Y8b 88' Y8b 88'     88  `8D */
-/*    88    88oobY'    88    88      88      88ooooo 88oobY' */
-/*    88    88`8b      88    88  ooo 88  ooo 88~~~~~ 88`8b   */
-/*    88    88 `88.   .88.   88. ~8~ 88. ~8~ 88.     88 `88. */
-/*    YP    88   YD Y888888P  Y888P   Y888P  Y88888P 88   YD */
+/* .d8888. db    db .d8888. d888888b d88888b .88b  d88. */
+/* 88'  YP `8b  d8' 88'  YP `~~88~~' 88'     88'YbdP`88 */
+/* `8bo.    `8bd8'  `8bo.      88    88ooooo 88  88  88 */
+/*   `Y8b.    88      `Y8b.    88    88~~~~~ 88  88  88 */
+/* db   8D    88    db   8D    88    88.     88  88  88 */
+/* `8888Y'    YP    `8888Y'    YP    Y88888P YP  YP  YP */
 
-type TriggerResponder<T extends readonly ConstructorOf<Object>[] = []> = (
-  ...args: {
-    [K in keyof T]: T[K] extends NumberConstructor
-      ? number
-      : T[K] extends StringConstructor
-        ? string
-        : T[K] extends BooleanConstructor
-          ? boolean
-          : InstanceOf<T[K]>;
-  }
+type InferEventReader<T extends Event<any>> = {
+  [eventReaderTag]: boolean;
+  event: T;
+};
+
+type InferEventWriter<T extends Event<any>> = {
+  [eventWriterTag]: boolean;
+  event: T;
+};
+
+type InferSystemArgs<T> = {
+  [K in keyof T]: T[K] extends ConstructorOf<Object>
+    ? InstanceOf<T[K]>
+    : T[K] extends QueryList
+      ? {
+          [Symbol.iterator]: () => IterableIterator<
+            [entityID: EntityID, ...InferQuery<T[K]>]
+          >;
+        }
+      : T[K] extends InferEventReader<infer U>
+        ? EventReader<U>
+        : T[K] extends InferEventWriter<infer U>
+          ? EventWriter<U>
+          : T[K] extends Resources
+            ? Resources
+            : never;
+};
+
+type SystemCallback<T extends readonly any[] = []> = (
+  ...args: InferSystemArgs<T>
 ) => void;
 
-type TriggererStorage = {
-  children: Map<ConstructorOf<Object>, TriggererStorage>;
-  responders: Set<TriggerResponder>;
-};
-
-export function Trigger<T extends readonly ConstructorOf<Object>[] = []>(
-  types: [...T],
-  callback: TriggerResponder<T>,
+export function System<T extends readonly any[] = []>(
+  name: string,
+  args: [...T],
+  callback: SystemCallback<T>,
 ) {
-  return { types, callback };
+  return { name, args, callback };
 }
 
-export class Triggerer {
-  #storage: TriggererStorage = { responders: new Set(), children: new Map() };
-
-  add<T extends readonly ConstructorOf<Object>[]>({
-    types,
-    callback,
-  }: {
-    types: [...T];
-    callback: TriggerResponder<T>;
-  }) {
-    this.addResponder(types, callback);
-  }
-
-  addResponder<T extends readonly ConstructorOf<Object>[]>(
-    types: [...T],
-    callback: TriggerResponder<T>,
-  ) {
-    let current = this.#storage;
-    for (const t of types) {
-      if (!current.children.has(t)) {
-        current.children.set(t, { responders: new Set(), children: new Map() });
-      }
-      current = current.children.get(t)!;
-    }
-    current.responders.add(callback);
-    return () => current.responders.delete(callback);
-  }
-
-  deleteResponder<T extends readonly ConstructorOf<Object>[]>(
-    types: [...T],
-    callback: TriggerResponder<T>,
-  ) {
-    let current = this.#storage;
-    for (const t of types) {
-      if (!current.children.has(t)) {
-        return;
-      }
-      current = current.children.get(t)!;
-    }
-    current.responders.delete(callback);
-  }
-
-  trigger(...payloads: Object[]) {
-    let current = this.#storage;
-    for (const _t of payloads) {
-      const t = ConstructorOf(_t);
-      const next = current.children.get(t);
-      if (!next) return;
-      current = next;
-    }
-    current.responders.forEach((it) =>
-      (<(...payloads: Object[]) => void>it)(...payloads),
-    );
-  }
-}
-
-/* d8888b. d88888b .d8888. */
-/* 88  `8D 88'     88'  YP */
-/* 88oobY' 88ooooo `8bo.   */
-/* 88`8b   88~~~~~   `Y8b. */
-/* 88 `88. 88.     db   8D */
-/* 88   YD Y88888P `8888Y' */
-
-type ResPtr<T = unknown> = {
-  data: T | undefined;
-  valid: boolean;
-  refCount: number;
-  key: any;
-};
-
-export class Res<T = unknown> {
-  #ptr: ResPtr<T>;
-  #disposed = false;
-  #res: Resources;
-
-  private constructor(
-    res: Resources,
-    ptr: ResPtr<T>,
-    disposalFn: VoidFunction,
-  ) {
-    this.#ptr = ptr;
-    this.#res = res;
-    this.dispose = () => {
-      if (this.#disposed) {
-        return;
-      }
-      this.#disposed = true;
-      disposalFn();
-    };
-  }
-
-  deref(): T {
-    if (this.#disposed) {
-      throw new Error("Resource handle has been disposed");
-    }
-    if (!this.#ptr.valid) {
-      throw new Error("Resource has been invalidated");
-    }
-    return this.#ptr.data!;
-  }
-
-  tryDeref(): T | null {
-    if (!this.#ptr.valid || this.#disposed) {
-      return null;
-    }
-    return this.#ptr.data!;
-  }
-
-  unwrap(): T | null {
-    return this.#ptr.data ?? null;
-  }
-
-  clone(): Res<T> {
-    return this.#res.clone(this);
-  }
-
-  /** @internal */
-  get ptr(): Readonly<ResPtr<T>> {
-    return this.#ptr;
-  }
-
-  readonly dispose: VoidFunction;
-}
-
-export class Resources {
-  #storage = new Map<any, ResPtr>();
-
-  #registry = new FinalizationRegistry<{ key: any; ptr: ResPtr }>((ctx) => {
-    this.#decrement(ctx.key, ctx.ptr);
-  });
-
-  create<T, Args extends any[]>(
-    key: ConstructorOf<T, Args>,
-    ...args: Args
-  ): Res<T> {
-    if (this.#storage.has(key)) {
-      const ptr = <ResPtr<T>>this.#storage.get(key);
-
-      try {
-        (ptr.data as any)?.destructor?.();
-      } catch (e) {}
-
-      ptr.data = isConstructor(key) ? new key(...args) : key;
-      ptr.valid = true;
-
-      return this.#createResource(key, ptr);
-    }
-
-    const ptr: ResPtr<T> = {
-      data: isConstructor(key) ? new key(...args) : key,
-      valid: true,
-      refCount: 1,
-      key,
-    };
-    this.#storage.set(key, ptr);
-
-    return this.#createResource(key, ptr);
-  }
-
-  add<T>(
-    key: any,
-    value: T,
-  ): Res<T> {
-    if (this.#storage.has(key)) {
-      const ptr = <ResPtr<T>>this.#storage.get(key);
-
-      try {
-        (ptr.data as any)?.destructor?.();
-      } catch (e) {}
-
-      ptr.data = value;
-      ptr.valid = true;
-
-      return this.#createResource(key, ptr);
-    }
-
-    const ptr: ResPtr<T> = {
-      data: value,
-      valid: true,
-      refCount: 1,
-      key,
-    };
-    this.#storage.set(key, ptr);
-
-    return this.#createResource(key, ptr);
-  }
-
-  get<T = unknown>(key: any): Res<T> {
-    const ptr = this.#storage.get(key);
-    if (!ptr) {
-      throw Error(`No Resource for key (${key}) available`);
-    }
-    ptr.refCount++;
-    return this.#createResource(key, <ResPtr<T>>ptr);
-  }
-
-  tryGet<T = unknown>(key: any): Res<T> | null {
-    const ptr = this.#storage.get(key);
-    if (!ptr) {
-      return null;
-    }
-    ptr.refCount++;
-    return this.#createResource(key, <ResPtr<T>>ptr);
-  }
-
-  clone<T>(res: Res<T>): Res<T> {
-    return this.get<T>(res.ptr.key);
-  }
-
-  unwrap<T = unknown>(key: any) {
-    return this.#storage.get(key);
-  }
-
-  #createResource<T>(key: any, ptr: ResPtr<T>): Res<T> {
-    const token = {};
-
-    // @ts-expect-error private constructor is module scoped
-    const resource = new Res<T>(this, ptr, () => {
-      this.#registry.unregister(token);
-      this.#decrement(key, ptr);
-    });
-
-    this.#registry.register(resource, { key, ptr }, token);
-
-    return resource;
-  }
-
-  #decrement(key: any, ptr: ResPtr) {
-    ptr.refCount--;
-
-    if (ptr.refCount === 0) {
-      this.#destroy(ptr);
-      if (this.#storage.get(key) === ptr) {
-        this.#storage.delete(key);
-      }
-    }
-  }
-
-  #destroy(ptr: ResPtr) {
-    if (!ptr.valid) return;
-
-    try {
-      (ptr.data as any)?.destructor?.();
-    } catch (e) {}
-
-    ptr.valid = false;
-    ptr.data = undefined;
-  }
-}
-
-/* d88888b d8b   db d888888b d888888b d888888b db    db */
-/* 88'     888o  88 `~~88~~'   `88'   `~~88~~' `8b  d8' */
-/* 88ooooo 88V8o 88    88       88       88     `8bd8'  */
-/* 88~~~~~ 88 V8o88    88       88       88       88    */
-/* 88.     88  V888    88      .88.      88       88    */
-/* Y88888P VP   V8P    YP    Y888888P    YP       YP    */
-
-export type EntityID = number;
-export const Entity = Number;
-export const entityIDField = Symbol.for("ECS::EntityIDField");
-export const currentEntity = Symbol.for("CurrentEntity");
+export type System = ReturnType<typeof System>;
 
 /* db   d8b   db  .d88b.  d8888b. db      d8888b. */
 /* 88   I8I   88 .8P  Y8. 88  `8D 88      88  `8D */
@@ -1105,142 +558,6 @@ export class World {
   }
 }
 
-/* d8888b. d88888b db      */
-/* 88  `8D 88'     88      */
-/* 88oobY' 88ooooo 88      */
-/* 88`8b   88~~~~~ 88      */
-/* 88 `88. 88.     88booo. */
-/* 88   YD Y88888P Y88888P */
-
-export class Relationship {
-  /**
-   * Parent a child entity to a parent entity.
-   * @param world - the {@link World} with the parent and child entities
-   * @param parent - the parent {@link EntityID}
-   * @param child - the child {@link EntityID}
-   * @returns void on success, Error otherwise
-   */
-  static Parent(world: World, parent: EntityID, child: EntityID) {
-    if (!world.exists(parent) || !world.exists(child)) {
-      throw Error(
-        `Cannot parent ${parent} to ${child}. One or both does not exist.`,
-      );
-    }
-
-    let parentRelationship = world.tryGetMut(parent, Relationship);
-
-    if (!parentRelationship) {
-      parentRelationship = new Relationship();
-      world.insert(parent, parentRelationship);
-    } else {
-      // check for circular relationships
-      let currentParent: EntityID | null = parent;
-      while (currentParent) {
-        if (currentParent === child) {
-          throw Error("Detected a circular relationship while parenting");
-        }
-        const currentRelationship: Relationship | null = world.tryGetMut(
-          currentParent,
-          Relationship,
-        );
-        currentParent = currentRelationship?._parent ?? null;
-      }
-    }
-
-    let childRelationship = world.tryGetMut(child, Relationship);
-    if (!childRelationship) {
-      childRelationship = new Relationship();
-      world.insert(child, childRelationship);
-    }
-
-    let oldParent = childRelationship._parent;
-    if (oldParent) {
-      Relationship.Unparent(world, oldParent, child);
-    }
-
-    parentRelationship._children ??= new Set<EntityID>();
-    parentRelationship._children.add(child);
-    childRelationship._parent = parent;
-  }
-
-  /**
-   * Unparent a child entity from a parent entity.
-   * @param world - the {@link World} with the parent and child entities
-   * @param parent - the parent {@link EntityID}
-   * @param child - the child {@link EntityID}
-   * @returns void on success, Error otherwise
-   */
-  static Unparent(
-    world: World,
-    parent: EntityID,
-    child: EntityID,
-  ): undefined | Error {
-    if (!world.exists(parent) || !world.exists(child)) {
-      throw Error(
-        `Cannot unparent ${parent} to ${child}. One or both does not exist.`,
-      );
-    }
-    let childRelationship = world.tryGetMut(child, Relationship);
-    if (!childRelationship) {
-      return;
-    }
-    let parentRelationship = world.tryGetMut(parent, Relationship);
-    if (!parentRelationship) {
-      return;
-    }
-    if (childRelationship.parent === parent) {
-      childRelationship._parent = null;
-    }
-    parentRelationship._children?.delete(child);
-  }
-
-  /** Get the parent {@link EntityID} */
-  get parent(): EntityID | null {
-    return this._parent;
-  }
-
-  /** Get a readonly Set with {@link EntityID}s of child entities */
-  get children(): ChildSet {
-    return this._children ?? <ChildSet>EMPTY_SET;
-  }
-
-  protected _parent: EntityID | null = null;
-  protected _children?: Set<EntityID>;
-}
-
-type ChildSet = Omit<Set<EntityID>, "add" | "delete" | "clear">;
-const EMPTY_SET: Set<any> = new Set();
-
-const relationshipSystem = System(
-  "RelationshipSystem",
-  [World, Triggerer],
-  (w, t) => {
-    t.addResponder(
-      [ComponentRemovalScheduled, Entity, Relationship],
-      (_, entity, rel) => {
-        if (rel.parent) {
-          Relationship.Unparent(w, rel.parent, entity);
-        }
-        for (const child of rel.children) {
-          Relationship.Unparent(w, entity, child);
-        }
-      },
-    );
-
-    t.addResponder(
-      [EntityDespawnScheduled, Entity, Relationship],
-      (_, entity, rel) => {
-        if (rel.parent) {
-          Relationship.Unparent(w, rel.parent, entity);
-        }
-        for (const child of rel.children) {
-          w.despawn(child);
-        }
-      },
-    );
-  },
-);
-
 /* d8888b. db      db    db  d888b  d888888b d8b   db */
 /* 88  `8D 88      88    88 88' Y8b   `88'   888o  88 */
 /* 88oodD' 88      88    88 88         88    88V8o 88 */
@@ -1249,60 +566,13 @@ const relationshipSystem = System(
 /* 88      Y88888P ~Y8888P'  Y888P  Y888888P VP   V8P */
 
 const pluginName = Symbol.for("PluginName");
+
 export type Plugin = ((app: App) => void) & { [pluginName]?: string };
+
 export function Plugin(name: string, plugin: Plugin): Plugin {
   plugin[pluginName] = name;
   return plugin;
 }
-
-/* .d8888. db    db .d8888. d888888b d88888b .88b  d88. */
-/* 88'  YP `8b  d8' 88'  YP `~~88~~' 88'     88'YbdP`88 */
-/* `8bo.    `8bd8'  `8bo.      88    88ooooo 88  88  88 */
-/*   `Y8b.    88      `Y8b.    88    88~~~~~ 88  88  88 */
-/* db   8D    88    db   8D    88    88.     88  88  88 */
-/* `8888Y'    YP    `8888Y'    YP    Y88888P YP  YP  YP */
-
-type InferEventReader<T extends Event<any>> = {
-  [eventReaderTag]: boolean;
-  event: T;
-};
-
-type InferEventWriter<T extends Event<any>> = {
-  [eventWriterTag]: boolean;
-  event: T;
-};
-
-type InferSystemArgs<T> = {
-  [K in keyof T]: T[K] extends ConstructorOf<Object>
-    ? InstanceOf<T[K]>
-    : T[K] extends QueryList
-      ? {
-          [Symbol.iterator]: () => IterableIterator<
-            [entityID: EntityID, ...InferQuery<T[K]>]
-          >;
-        }
-      : T[K] extends InferEventReader<infer U>
-        ? EventReader<U>
-        : T[K] extends InferEventWriter<infer U>
-          ? EventWriter<U>
-          : T[K] extends Resources
-            ? Resources
-            : never;
-};
-
-type SystemCallback<T extends readonly any[] = []> = (
-  ...args: InferSystemArgs<T>
-) => void;
-
-export function System<T extends readonly any[] = []>(
-  name: string,
-  args: [...T],
-  callback: SystemCallback<T>,
-) {
-  return { name, args, callback };
-}
-
-export type System = ReturnType<typeof System>;
 
 /*  .d8b.  d8888b. d8888b. */
 /* d8' `8b 88  `8D 88  `8D */
@@ -1505,7 +775,7 @@ export class App {
           s.callback.apply(null, s.args);
         } catch (error) {
           this.#config.onSystemError(error);
-          appLogger.critical(`Error in pre startup system ${s.name}: ${error}`);
+          logger.critical(`Error in pre startup system ${s.name}: ${error}`);
           throw error;
         }
       }
@@ -1516,7 +786,7 @@ export class App {
           s.callback.apply(null, s.args);
         } catch (error) {
           this.#config.onSystemError(error);
-          appLogger.critical(`Error in startup system ${s.name}: ${error}`);
+          logger.critical(`Error in startup system ${s.name}: ${error}`);
           throw error;
         }
       }
@@ -1527,7 +797,7 @@ export class App {
           s.callback.apply(null, s.args);
         } catch (error) {
           this.#config.onSystemError(error);
-          appLogger.critical(
+          logger.critical(
             `Error in post startup system ${s.name}: ${error}`,
           );
           throw error;
@@ -1663,3 +933,139 @@ export class App {
     return result;
   }
 }
+
+/* d8888b. d88888b db      */
+/* 88  `8D 88'     88      */
+/* 88oobY' 88ooooo 88      */
+/* 88`8b   88~~~~~ 88      */
+/* 88 `88. 88.     88booo. */
+/* 88   YD Y88888P Y88888P */
+
+export class Relationship {
+  /**
+   * Parent a child entity to a parent entity.
+   * @param world - the {@link World} with the parent and child entities
+   * @param parent - the parent {@link EntityID}
+   * @param child - the child {@link EntityID}
+   * @returns void on success, Error otherwise
+   */
+  static Parent(world: World, parent: EntityID, child: EntityID) {
+    if (!world.exists(parent) || !world.exists(child)) {
+      throw Error(
+        `Cannot parent ${parent} to ${child}. One or both does not exist.`,
+      );
+    }
+
+    let parentRelationship = world.tryGetMut(parent, Relationship);
+
+    if (!parentRelationship) {
+      parentRelationship = new Relationship();
+      world.insert(parent, parentRelationship);
+    } else {
+      // check for circular relationships
+      let currentParent: EntityID | null = parent;
+      while (currentParent) {
+        if (currentParent === child) {
+          throw Error("Detected a circular relationship while parenting");
+        }
+        const currentRelationship: Relationship | null = world.tryGetMut(
+          currentParent,
+          Relationship,
+        );
+        currentParent = currentRelationship?._parent ?? null;
+      }
+    }
+
+    let childRelationship = world.tryGetMut(child, Relationship);
+    if (!childRelationship) {
+      childRelationship = new Relationship();
+      world.insert(child, childRelationship);
+    }
+
+    let oldParent = childRelationship._parent;
+    if (oldParent) {
+      Relationship.Unparent(world, oldParent, child);
+    }
+
+    parentRelationship._children ??= new Set<EntityID>();
+    parentRelationship._children.add(child);
+    childRelationship._parent = parent;
+  }
+
+  /**
+   * Unparent a child entity from a parent entity.
+   * @param world - the {@link World} with the parent and child entities
+   * @param parent - the parent {@link EntityID}
+   * @param child - the child {@link EntityID}
+   * @returns void on success, Error otherwise
+   */
+  static Unparent(
+    world: World,
+    parent: EntityID,
+    child: EntityID,
+  ): undefined | Error {
+    if (!world.exists(parent) || !world.exists(child)) {
+      throw Error(
+        `Cannot unparent ${parent} to ${child}. One or both does not exist.`,
+      );
+    }
+    let childRelationship = world.tryGetMut(child, Relationship);
+    if (!childRelationship) {
+      return;
+    }
+    let parentRelationship = world.tryGetMut(parent, Relationship);
+    if (!parentRelationship) {
+      return;
+    }
+    if (childRelationship.parent === parent) {
+      childRelationship._parent = null;
+    }
+    parentRelationship._children?.delete(child);
+  }
+
+  /** Get the parent {@link EntityID} */
+  get parent(): EntityID | null {
+    return this._parent;
+  }
+
+  /** Get a readonly Set with {@link EntityID}s of child entities */
+  get children(): ChildSet {
+    return this._children ?? <ChildSet>EMPTY_SET;
+  }
+
+  protected _parent: EntityID | null = null;
+  protected _children?: Set<EntityID>;
+}
+
+type ChildSet = Omit<Set<EntityID>, "add" | "delete" | "clear">;
+const EMPTY_SET: Set<any> = new Set();
+
+const relationshipSystem = System(
+  "RelationshipSystem",
+  [World, Triggerer],
+  (w, t) => {
+    t.addResponder(
+      [ComponentRemovalScheduled, Entity, Relationship],
+      (_, entity, rel) => {
+        if (rel.parent) {
+          Relationship.Unparent(w, rel.parent, entity);
+        }
+        for (const child of rel.children) {
+          Relationship.Unparent(w, entity, child);
+        }
+      },
+    );
+
+    t.addResponder(
+      [EntityDespawnScheduled, Entity, Relationship],
+      (_, entity, rel) => {
+        if (rel.parent) {
+          Relationship.Unparent(w, rel.parent, entity);
+        }
+        for (const child of rel.children) {
+          w.despawn(child);
+        }
+      },
+    );
+  },
+);
