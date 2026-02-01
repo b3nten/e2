@@ -59,6 +59,7 @@ import {
   Clock
 } from "./lib.ts";
 
+// F_schedule
 /* .d8888.  .o88b. db   db d88888b d8888b. db    db db      d88888b  */
 /* 88'  YP d8P  Y8 88   88 88'     88  `8D 88    88 88      88'      */
 /* `8bo.   8P      88ooo88 88ooooo 88   88 88    88 88      88ooooo  */
@@ -95,6 +96,7 @@ export enum Schedule {
   Destroy = "Destroy",
 }
 
+// F_entity
 /* d88888b d8b   db d888888b d888888b d888888b db    db */
 /* 88'     888o  88 `~~88~~'   `88'   `~~88~~' `8b  d8' */
 /* 88ooooo 88V8o 88    88       88       88     `8bd8'  */
@@ -107,6 +109,7 @@ export const Entity = Number;
 export const entityIDField = Symbol.for("ECS::EntityIDField");
 export const currentEntity = Symbol.for("CurrentEntity");
 
+// F_query
 /*  .d88b.  db    db d88888b d8888b. db    db */
 /* .8P  Y8. 88    88 88'     88  `8D `8b  d8' */
 /* 88    88 88    88 88ooooo 88oobY'  `8bd8'  */
@@ -158,6 +161,7 @@ type InferQuery<T extends QueryList> = {
       : never;
 };
 
+// F_system
 /* .d8888. db    db .d8888. d888888b d88888b .88b  d88. */
 /* 88'  YP `8b  d8' 88'  YP `~~88~~' 88'     88'YbdP`88 */
 /* `8bo.    `8bd8'  `8bo.      88    88ooooo 88  88  88 */
@@ -207,6 +211,7 @@ export function System<T extends readonly any[] = []>(
 
 export type System = ReturnType<typeof System>;
 
+// F_world
 /* db   d8b   db  .d88b.  d8888b. db      d8888b. */
 /* 88   I8I   88 .8P  Y8. 88  `8D 88      88  `8D */
 /* 88   I8I   88 88    88 88oobY' 88      88   88 */
@@ -574,6 +579,7 @@ export function Plugin(name: string, plugin: Plugin): Plugin {
   return plugin;
 }
 
+// F_app
 /*  .d8b.  d8888b. d8888b. */
 /* d8' `8b 88  `8D 88  `8D */
 /* 88ooo88 88oodD' 88oodD' */
@@ -934,6 +940,7 @@ export class App {
   }
 }
 
+// F_relationship
 /* d8888b. d88888b db      */
 /* 88  `8D 88'     88      */
 /* 88oobY' 88ooooo 88      */

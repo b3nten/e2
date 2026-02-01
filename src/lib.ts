@@ -22,6 +22,7 @@ containers, loggers, and other basic useful utilities.
 
 _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
+// F_types
 /* d888888b db    db d8888b. d88888b .d8888. */
 /* `~~88~~' `8b  d8' 88  `8D 88'     88'  YP */
 /*    88     `8bd8'  88oodD' 88ooooo `8bo.   */
@@ -720,6 +721,7 @@ type Check<Input = unknown, Output = Input> = (
   input: Input,
 ) => input is SubType<Input, Output>;
 
+// F_assert
 /*  .d8b.  .d8888. .d8888. d88888b d8888b. d888888b */
 /* d8' `8b 88'  YP 88'  YP 88'     88  `8D `~~88~~' */
 /* 88ooo88 `8bo.   `8bo.   88ooooo 88oobY'    88    */
@@ -941,6 +943,7 @@ export function cast<T>(obj: any): T {
   return obj as T;
 }
 
+// F_checks
 /*  .o88b. db   db d88888b  .o88b. db   dD .d8888. */
 /* d8P  Y8 88   88 88'     d8P  Y8 88 ,8P' 88'  YP */
 /* 8P      88ooo88 88ooooo 8P      88,8P   `8bo.   */
@@ -1136,6 +1139,7 @@ export function forEach<T>(
   }
 }
 
+// F_math
 /* .88b  d88.  .d8b.  d888888b db   db */
 /* 88'YbdP`88 d8' `8b `~~88~~' 88   88 */
 /* 88  88  88 88ooo88    88    88ooo88 */
@@ -1197,6 +1201,7 @@ export function lerpSmooth(
   return lerp(start, end, -Math.expm1(-(Math.LN2 * delta) / (halflife + 1e-5)));
 }
 
+// F_ease
 /* d88888b  .d8b.  .d8888. d88888b */
 /* 88'     d8' `8b 88'  YP 88'     */
 /* 88ooooo 88ooo88 `8bo.   88ooooo */
@@ -1332,6 +1337,7 @@ export const easeOutBounce: EasingFunction = bounceOut;
 export const easeInOutBounce: EasingFunction = (x) =>
   x < 0.5 ? (1 - bounceOut(1 - 2 * x)) / 2 : (1 + bounceOut(2 * x - 1)) / 2;
 
+// F_sparse
 /* .d8888. d8888b.  .d8b.  d8888b. .d8888. d88888b */
 /* 88'  YP 88  `8D d8' `8b 88  `8D 88'  YP 88'     */
 /* `8bo.   88oodD' 88ooo88 88oobY' `8bo.   88ooooo */
@@ -1406,6 +1412,7 @@ export class SparseSet<T> {
   private components: T[] = [];
 }
 
+// F_auto
 /*  .d8b.  db    db d888888b  .d88b.  */
 /* d8' `8b 88    88 `~~88~~' .8P  Y8. */
 /* 88ooo88 88    88    88    88    88 */
@@ -1429,6 +1436,7 @@ export class AutoMap<K, V> extends Map<K, V> {
   }
 }
 
+// F_pool
 /* d8888b.  .d88b.   .d88b.  db      */
 /* 88  `8D .8P  Y8. .8P  Y8. 88      */
 /* 88oodD' 88    88 88    88 88      */
@@ -1541,6 +1549,7 @@ export class ObjectPool<T> {
   protected growthStrategy: (currentSize: number) => number = (it) => it * 2;
 }
 
+// F_log
 /* db       .d88b.   d888b  */
 /* 88      .8P  Y8. 88' Y8b */
 /* 88      88    88 88      */
@@ -1970,6 +1979,7 @@ export const silentLogger = new Logger(
   LogLevel.Silent,
 );
 
+// F_composite
 /*  .o88b.  .d88b.  .88b  d88. d8888b.  .d88b.  .d8888. d888888b d888888b d88888b */
 /* d8P  Y8 .8P  Y8. 88'YbdP`88 88  `8D .8P  Y8. 88'  YP   `88'   `~~88~~' 88'     */
 /* 8P      88    88 88  88  88 88oodD' 88    88 `8bo.      88       88    88ooooo */
@@ -2083,6 +2093,7 @@ class EmptySet extends Set<any> {
 
 export const EMPTY_SET = new EmptySet;
 
+// F_clock
 /*  .o88b. db       .d88b.   .o88b. db   dD */
 /* d8P  Y8 88      .8P  Y8. d8P  Y8 88 ,8P' */
 /* 8P      88      88    88 8P      88,8P   */
@@ -2125,6 +2136,7 @@ export class Clock {
   }
 }
 
+// F_asset
 /*  .d8b.  .d8888. .d8888. d88888b d888888b */
 /* d8' `8b 88'  YP 88'  YP 88'     `~~88~~' */
 /* 88ooo88 `8bo.   `8bo.   88ooooo    88    */
@@ -2274,6 +2286,7 @@ export class Assets {
   }
 }
 
+// F_events
 /* d88888b db    db d88888b d8b   db d888888b .d8888. */
 /* 88'     88    88 88'     888o  88 `~~88~~' 88'  YP */
 /* 88ooooo Y8    8P 88ooooo 88V8o 88    88    `8bo.   */
@@ -2404,6 +2417,7 @@ export class EventQueue<T extends Event<any>> {
   }
 }
 
+// F_trigger
 /* d888888b d8888b. d888888b  d888b   d888b  d88888b d8888b. */
 /* `~~88~~' 88  `8D   `88'   88' Y8b 88' Y8b 88'     88  `8D */
 /*    88    88oobY'    88    88      88      88ooooo 88oobY' */
@@ -2491,6 +2505,7 @@ export class Triggerer {
   }
 }
 
+// F_resource
 /* d8888b. d88888b .d8888. */
 /* 88  `8D 88'     88'  YP */
 /* 88oobY' 88ooooo `8bo.   */
