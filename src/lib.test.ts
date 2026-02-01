@@ -59,24 +59,27 @@ Deno.test("ObjectPool - alloc returns objects from pool", () => {
   assertEquals(pool.size, 3);
 });
 
-Deno.test("ObjectPool - alloc grows pool when exhausted (default strategy)", () => {
-  const pool = new ObjectPool<ObjectPool_TestObject>({
-    initialSize: 2,
-    createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
-  });
+Deno.test(
+  "ObjectPool - alloc grows pool when exhausted (default strategy)",
+  () => {
+    const pool = new ObjectPool<ObjectPool_TestObject>({
+      initialSize: 2,
+      createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
+    });
 
-  pool.alloc();
-  pool.alloc();
-  assertEquals(pool.size, 2);
-  assertEquals(pool.sizeOfReserve, 0);
+    pool.alloc();
+    pool.alloc();
+    assertEquals(pool.size, 2);
+    assertEquals(pool.sizeOfReserve, 0);
 
-  // This should trigger growth (default: currentSize * 2 = 2 * 2 = 4)
-  const obj3 = pool.alloc();
-  assertExists(obj3);
-  assertEquals(pool.size, 6); // 2 original + 4 new
-  assertEquals(pool.sizeOfActive, 3);
-  assertEquals(pool.sizeOfReserve, 3);
-});
+    // This should trigger growth (default: currentSize * 2 = 2 * 2 = 4)
+    const obj3 = pool.alloc();
+    assertExists(obj3);
+    assertEquals(pool.size, 6); // 2 original + 4 new
+    assertEquals(pool.sizeOfActive, 3);
+    assertEquals(pool.sizeOfReserve, 3);
+  },
+);
 
 Deno.test("ObjectPool - custom growth strategy", () => {
   const pool = new ObjectPool<ObjectPool_TestObject>({
@@ -137,7 +140,11 @@ Deno.test("ObjectPool - free ignores objects not in active set", () => {
     createObject: (index) => ({ id: index, value: "", resetCount: 0 }),
   });
 
-  const externalObj: ObjectPool_TestObject = { id: 999, value: "external", resetCount: 0 };
+  const externalObj: ObjectPool_TestObject = {
+    id: 999,
+    value: "external",
+    resetCount: 0,
+  };
 
   // Should not throw or affect pool
   pool.free(externalObj);
@@ -241,7 +248,9 @@ Deno.test("ObjectPool - complex lifecycle", () => {
   const pool = new ObjectPool<ObjectPool_Counter>({
     initialSize: 2,
     createObject: (index) => ({ count: 0 }),
-    resetObject: (obj) => { obj.count = 0; },
+    resetObject: (obj) => {
+      obj.count = 0;
+    },
   });
 
   // Allocate all
@@ -361,7 +370,7 @@ Deno.test("ObjectPool - growth with custom strategy that returns 0", () => {
 
   pool.alloc();
   pool.alloc(); // should still grow by one
-  assertEquals(pool.size, 2)
+  assertEquals(pool.size, 2);
 });
 
 Deno.test("ObjectPool - createObject receives correct indices", () => {
@@ -457,7 +466,7 @@ Deno.test("CompositeMap - keys iterator", () => {
   const keys = Array.from(map.keys());
   assertEquals(keys.length, 3);
 
-  const keysSet = new Set(keys.map(k => JSON.stringify(k)));
+  const keysSet = new Set(keys.map((k) => JSON.stringify(k)));
   assertEquals(keysSet.has(JSON.stringify(["a", "b"])), true);
   assertEquals(keysSet.has(JSON.stringify(["a", "c"])), true);
   assertEquals(keysSet.has(JSON.stringify(["d"])), true);
@@ -571,10 +580,7 @@ Deno.test("CompositeMap - iteration ignores deleted entries", () => {
 Deno.test("CompositeMap - chaining set calls", () => {
   const map = new CompositeMap<string>();
 
-  map
-    .set(["a"], "value1")
-    .set(["b"], "value2")
-    .set(["c"], "value3");
+  map.set(["a"], "value1").set(["b"], "value2").set(["c"], "value3");
 
   assertEquals(map.get(["a"]), "value1");
   assertEquals(map.get(["b"]), "value2");

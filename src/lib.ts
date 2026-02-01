@@ -1079,9 +1079,7 @@ export function runCatching<T>(
   try {
     const result = fn();
     if (result instanceof Promise) {
-      return result
-        .then(Ok)
-        .catch(Err) as any;
+      return result.then(Ok).catch(Err) as any;
     }
     return Ok(result) as any;
   } catch (e) {
@@ -1478,7 +1476,7 @@ export class ObjectPool<T> {
     this.resetObject = options.resetObject;
 
     if (options.initialSize < 1) {
-      options.initialSize = 1
+      options.initialSize = 1;
     }
 
     for (let index = 0; index < options.initialSize; index++) {
@@ -1496,7 +1494,7 @@ export class ObjectPool<T> {
       const currentSize = this.size;
       let growthAmount = this.growthStrategy(currentSize);
       if (growthAmount < 1) {
-        growthAmount = 1
+        growthAmount = 1;
       }
       for (let index = 0; index < growthAmount; index++) {
         const newObject = this.createObject(currentSize + index);
@@ -1777,11 +1775,13 @@ function env(): any {
 
 // @ts-ignore - Deno specific
 function isWindows(): boolean {
+  // @ts-expect-error
   return /^win/i.test(globalThis.process?.platform || "");
 }
 
 function hasTTY(): boolean {
   return _toBool(
+    // @ts-expect-error
     globalThis.process?.stdout && globalThis.process?.stdout.isTTY,
   );
 }
@@ -1974,10 +1974,7 @@ export class Logger {
   };
 }
 
-export const silentLogger = new Logger(
-  "",
-  LogLevel.Silent,
-);
+export const silentLogger = new Logger("", LogLevel.Silent);
 
 // F_composite
 /*  .o88b.  .d88b.  .88b  d88. d8888b.  .d88b.  .d8888. d888888b d888888b d88888b */
@@ -2087,11 +2084,11 @@ export class CompositeMap<T> {
 
 class EmptySet extends Set<any> {
   add(value: any): this {
-    return this
+    return this;
   }
 }
 
-export const EMPTY_SET = new EmptySet;
+export const EMPTY_SET = new EmptySet();
 
 // F_clock
 /*  .o88b. db       .d88b.   .o88b. db   dD */
@@ -2228,9 +2225,7 @@ export class Assets {
     const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
     if (instance) return new Handle(instance);
 
-    return new Handle(
-      this.#resources.add(asset.path, this.#load(asset, null)),
-    );
+    return new Handle(this.#resources.add(asset.path, this.#load(asset, null)));
   }
 
   get<T>(asset: AssetType<T>): Handle<T> {
@@ -2609,10 +2604,7 @@ export class Resources {
     return this.#createResource(key, ptr);
   }
 
-  add<T>(
-    key: any,
-    value: T,
-  ): Res<T> {
+  add<T>(key: any, value: T): Res<T> {
     if (this.#storage.has(key)) {
       const ptr = <ResPtr<T>>this.#storage.get(key);
 

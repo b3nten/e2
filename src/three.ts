@@ -26,12 +26,7 @@
                   `...-'     dp                                `...-'*/
 
 import * as Three from "three";
-import {
-  type EntityID,
-  Relationship,
-  System,
-  World,
-} from "./core";
+import { type EntityID, Relationship, System, World } from "./core";
 import type { WebGPURenderer } from "three/webgpu";
 import { Triggerer, type Immutable, type Mutable, type Nullish } from "./lib";
 
@@ -53,7 +48,7 @@ export class Transform {
   private static vec3 = new Three.Vector3();
   private static quat = new Three.Quaternion();
 
-  private static chain: Three.Matrix4[] = []
+  private static chain: Three.Matrix4[] = [];
   static CalculateWorldMatrix(
     world: World,
     entity: EntityID,
@@ -63,12 +58,15 @@ export class Transform {
     let current: EntityID | Nullish = entity;
 
     while (current) {
-      const rel: Immutable<Relationship> | null = world.tryGet(current, Relationship);
+      const rel: Immutable<Relationship> | null = world.tryGet(
+        current,
+        Relationship,
+      );
       const t = world.tryGet(current, Transform);
       if (t) {
         this.chain.push(t.calculateMatrix());
       }
-      current = rel?.parent
+      current = rel?.parent;
     }
 
     input.identity();
@@ -250,9 +248,7 @@ export const threeObjectSyncSystem = System(
 export const threeRenderSystemInit = System(
   "Three::RenderSystem::Init",
   [ThreeData],
-  (threeData) => {
-
-  },
+  (threeData) => {},
 );
 
 // postupdate

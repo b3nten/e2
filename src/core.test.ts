@@ -1,13 +1,11 @@
-import { assertEquals, assert, assertExists, assertThrows, } from "jsr:@std/assert";
 import {
-  Query,
-} from "./core.ts";
-import {
-  Event,
-  EventQueue,
-  EvReader,
-  EvWriter,
-} from "./lib.ts"
+  assertEquals,
+  assert,
+  assertExists,
+  assertThrows,
+} from "jsr:@std/assert";
+import { Query } from "./core.ts";
+import { Event, EventQueue, EvReader, EvWriter } from "./lib.ts";
 import { World, Mut } from "./core.ts";
 
 const PingEvent = Event<{ id: number; msg: string }>("Ping");
@@ -147,8 +145,8 @@ Deno.test("Event System - Tag Helpers", () => {
   const wSymbols = Object.getOwnPropertySymbols(w);
   const rSymbols = Object.getOwnPropertySymbols(r);
 
-  assert(wSymbols.some(s => s.toString() === "Symbol(EventWriterTag)"));
-  assert(rSymbols.some(s => s.toString() === "Symbol(EventReaderTag)"));
+  assert(wSymbols.some((s) => s.toString() === "Symbol(EventWriterTag)"));
+  assert(rSymbols.some((s) => s.toString() === "Symbol(EventReaderTag)"));
 });
 
 Deno.test("Event System - Event Type Safety", () => {
@@ -240,7 +238,7 @@ Deno.test("World: Component Exclusivity (Error on reuse)", () => {
       world.insert(entityB, pos);
     },
     Error,
-    "Component exists on another entity"
+    "Component exists on another entity",
   );
 });
 
@@ -255,8 +253,8 @@ Deno.test("World: Adding existing Components", () => {
   assertEquals(world.get(entity, Position).x, 10);
 
   assertThrows(() => {
-      world.insert(entity, pos2);
-  })
+    world.insert(entity, pos2);
+  });
 });
 
 Deno.test("World: Deferred Removal (Remove + Flush)", () => {

@@ -56,7 +56,7 @@ import {
   Resources,
   SparseSet,
   Triggerer,
-  Clock
+  Clock,
 } from "./lib.ts";
 
 // F_schedule
@@ -105,8 +105,11 @@ export enum Schedule {
 /* Y88888P VP   V8P    YP    Y888888P    YP       YP    */
 
 export type EntityID = number;
+
 export const Entity = Number;
+
 export const entityIDField = Symbol.for("ECS::EntityIDField");
+
 export const currentEntity = Symbol.for("CurrentEntity");
 
 // F_query
@@ -222,10 +225,13 @@ export type System = ReturnType<typeof System>;
 // trigger keys
 export class ComponentInserted {}
 const componentInserted = new ComponentInserted();
+
 export class ComponentRemovalScheduled {}
 const componentRemovalScheduled = new ComponentRemovalScheduled();
+
 export class EntitySpawned {}
 const entitySpawned = new EntitySpawned();
+
 export class EntityDespawnScheduled {}
 const entityDespawnScheduled = new EntityDespawnScheduled();
 
@@ -803,9 +809,7 @@ export class App {
           s.callback.apply(null, s.args);
         } catch (error) {
           this.#config.onSystemError(error);
-          logger.critical(
-            `Error in post startup system ${s.name}: ${error}`,
-          );
+          logger.critical(`Error in post startup system ${s.name}: ${error}`);
           throw error;
         }
       }
