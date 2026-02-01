@@ -144,30 +144,30 @@ export class Handle<T> {
   }
 
   get pending() {
-    return this.#asset.tryGet()?.pending ?? false;
+    return this.#asset.tryDeref()?.pending ?? false;
   }
 
   get promise() {
-    return this.#asset.tryGet()?.promise ?? Promise.reject(Err("Disposed"));
+    return this.#asset.tryDeref()?.promise ?? Promise.reject(Err("Disposed"));
   }
 
   get error() {
-    const data = this.#asset.tryGet()?.data;
+    const data = this.#asset.tryDeref()?.data;
     if (data?.ok) return null;
     else return data?.error;
   }
 
   get ready() {
-    const a = this.#asset.tryGet();
+    const a = this.#asset.tryDeref();
     return a?.data?.ok ?? false;
   }
 
   get ptr(): Readonly<AssetInstance<T>> | null {
-    return this.#asset.tryGet();
+    return this.#asset.tryDeref();
   }
 
   get() {
-    const a = this.#asset.get();
+    const a = this.#asset.deref();
     if (a.pending) {
       throw Error("Asset is pending");
     }
@@ -178,7 +178,7 @@ export class Handle<T> {
   }
 
   tryGet() {
-    const a = this.#asset.get();
+    const a = this.#asset.deref();
     if (a.pending || !a.data?.ok) {
       return null;
     }
@@ -222,7 +222,9 @@ export class Assets {
     const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
     if (instance) return new Handle(instance);
 
-    return new Handle(this.#resources.add(asset.path, this.#load(asset, null)));
+    return new Handle(
+      this.#resources.add(asset.path, this.#load(asset, null)),
+    );
   }
 
   get<T>(asset: AssetType<T>): Handle<T> {
@@ -245,7 +247,7 @@ export class Assets {
     asset: AssetType<T>,
     oldRes: Res<AssetInstance<T>> | null,
   ): AssetInstance<T> {
-    const old = oldRes?.tryGet();
+    const old = oldRes?.tryDeref();
 
     if (old?.pending) {
       old.controller.abort();
@@ -581,7 +583,7 @@ export class Res<T = unknown> {
     };
   }
 
-  get(): T {
+  deref(): T {
     if (this.#disposed) {
       throw new Error("Resource handle has been disposed");
     }
@@ -591,7 +593,7 @@ export class Res<T = unknown> {
     return this.#ptr.data!;
   }
 
-  tryGet(): T | null {
+  tryDeref(): T | null {
     if (!this.#ptr.valid || this.#disposed) {
       return null;
     }
@@ -621,7 +623,38 @@ export class Resources {
     this.#decrement(ctx.key, ctx.ptr);
   });
 
-  add<T>(key: any, value: T): Res<T> {
+  create<T, Args extends any[]>(
+    key: ConstructorOf<T, Args>,
+    ...args: Args
+  ): Res<T> {
+    if (this.#storage.has(key)) {
+      const ptr = <ResPtr<T>>this.#storage.get(key);
+
+      try {
+        (ptr.data as any)?.destructor?.();
+      } catch (e) {}
+
+      ptr.data = isConstructor(key) ? new key(...args) : key;
+      ptr.valid = true;
+
+      return this.#createResource(key, ptr);
+    }
+
+    const ptr: ResPtr<T> = {
+      data: isConstructor(key) ? new key(...args) : key,
+      valid: true,
+      refCount: 1,
+      key,
+    };
+    this.#storage.set(key, ptr);
+
+    return this.#createResource(key, ptr);
+  }
+
+  add<T>(
+    key: any,
+    value: T,
+  ): Res<T> {
     if (this.#storage.has(key)) {
       const ptr = <ResPtr<T>>this.#storage.get(key);
 
@@ -635,7 +668,12 @@ export class Resources {
       return this.#createResource(key, ptr);
     }
 
-    const ptr: ResPtr<T> = { data: value, valid: true, refCount: 1, key };
+    const ptr: ResPtr<T> = {
+      data: value,
+      valid: true,
+      refCount: 1,
+      key,
+    };
     this.#storage.set(key, ptr);
 
     return this.#createResource(key, ptr);
@@ -1027,7 +1065,7 @@ export class World {
   *queryIter<T extends QueryList>(
     query: T,
   ): IterableIterator<[EntityID, ...InferQuery<T>]> {
-    const u = (item: any) => item["mutComponent"] ?? item;
+    const u = (item: any) => item[mutTag] ?? item;
 
     if (query.length === 0) return;
     if (query.length > this.#mutWrappers.length) {
@@ -1383,7 +1421,7 @@ export class App {
     }
     for (const r of resources) {
       this.#logger.info(`Registering resource ${r.name}`);
-      this.#staticResources.set(r, this.#resourceManager.add(r, new r()));
+      this.#staticResources.set(r, this.#resourceManager.create(r));
     }
     return this;
   }
@@ -1609,7 +1647,7 @@ export class App {
         }
         result.push(queue.getWriter());
       } else {
-        const res = this.#resourceManager.tryGet(arg)?.tryGet();
+        const res = this.#resourceManager.tryGet(arg)?.tryDeref();
         if (!res) {
           throw Error(
             `Could not resolve argument ${arg.name} for system ${system.name}.`,

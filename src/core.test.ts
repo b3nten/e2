@@ -4,6 +4,7 @@ import {
   EventQueue,
   EvReader,
   EvWriter,
+  Query,
 } from "./core.ts";
 import { World, Mut } from "./core.ts";
 
@@ -357,24 +358,14 @@ Deno.test("World: Query with Mutable Components", () => {
   const world = new World();
   const e1 = world.spawn(new Position(10, 10));
 
-  // Simulating the "Mut" wrapper check logic: item["mutComponent"]
-  // Logic in core.ts: if ("mutComponent" in query[i]) -> wrap it
-
   let iterated = false;
-
-  // We pass `Mut(Position)` which returns { mutComponent: Position }
-  for (const [id, mutPos] of world.queryIter([Mut(Position)])) {
+  for (const [id, mutPos] of world.queryIter(Query(Mut(Position)))) {
     iterated = true;
     assertEquals(id, e1);
-
-    // mutPos should be the MutRef wrapper.
-    // The implementation assigns .value = component
-    assertEquals(mutPos.value.x, 10);
-
-    // Modify via the wrapper
-    mutPos.value.x = 99;
+    assertEquals(mutPos.ref.x, 10);
+    mutPos.deref().x = 99;
   }
 
-  assertEquals(iterated, true);
   assertEquals(world.get(e1, Position).x, 99);
+  assertEquals(iterated, true);
 });

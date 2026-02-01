@@ -26,8 +26,16 @@
                   `...-'     dp                                `...-'*/
 
 import * as Three from "three";
-import { type EntityID, Query, Relationship, System, Triggerer, World } from "./core";
+import {
+  type EntityID,
+  Query,
+  Relationship,
+  System,
+  Triggerer,
+  World,
+} from "./core";
 import type { WebGPURenderer } from "three/webgpu";
+import type { Immutable, Mutable, Nullish } from "./lib";
 
 /*_,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_
 
@@ -47,12 +55,31 @@ export class Transform {
   private static vec3 = new Three.Vector3();
   private static quat = new Three.Quaternion();
 
+  private static chain: Three.Matrix4[] = []
   static CalculateWorldMatrix(
     world: World,
     entity: EntityID,
-    input: Three.Matrix4 = new Three.Matrix4()
+    input: Three.Matrix4 = new Three.Matrix4(),
   ) {
+    this.chain.length = 0;
+    let current: EntityID | Nullish = entity;
 
+    while (current) {
+      const rel: Immutable<Relationship> | null = world.tryGet(current, Relationship);
+      const t = world.tryGet(current, Transform);
+      if (t) {
+        this.chain.push(t.calculateMatrix());
+      }
+      current = rel?.parent
+    }
+
+    input.identity();
+    for (let i = this.chain.length - 1; i >= 0; --i) {
+      input.multiply(this.chain[i]);
+    }
+
+    this.chain.length = 0;
+    return input;
   }
 
   static WithPosition(x: number, y: number, z: number) {
@@ -89,8 +116,6 @@ export class Transform {
    * Use {@link calculateMatrix}.
    */
   public readonly matrix = new Three.Matrix4();
-
-  public readonly worldMatrix = new Three.Matrix4();
 
   /** Calculate the local matrix of this transform */
   calculateMatrix(): Three.Matrix4 {
@@ -216,6 +241,6 @@ export const threeRenderSystemInit = System(
 // postupdate
 export const threeRenderSystemRender = System(
   "Three::RenderSystem::Renderer",
-  [ThreeData, Query(Transform)],
+  [ThreeData],
   (threeData) => {},
 );
