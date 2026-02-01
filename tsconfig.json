@@ -1,0 +1,28 @@
+{
+	"compilerOptions": {
+		"target": "ES2023",
+		"useDefineForClassFields": true,
+		"lib": ["ES2023", "DOM", "DOM.Iterable"],
+		"module": "ESNext",
+		"skipLibCheck": true,
+		"experimentalDecorators": false,
+		"moduleResolution": "bundler",
+		"verbatimModuleSyntax": true,
+		"moduleDetection": "force",
+		"noEmit": true,
+		"strict": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedSideEffectImports": true,
+		"allowImportingTsExtensions": true,
+		"allowJs": true,
+		"checkJs": true,
+		"paths": {
+		  "three": ["./include/three@0.182.0/types/src/Three"],
+			"three/webgpu": ["./include/three@0.182.0/types/src/Three.WebGPU"],
+			"three/examples/jsm/*": ["./include/three@0.182.0/types/examples/jsm/*"],
+			"three/tsl": ["./include/three@0.182.0/types/src/Three.TSL"]
+		}
+	},
+}

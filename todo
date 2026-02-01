@@ -21,3 +21,4 @@
     - [x] object pool
     - [x] ECS
     - [ ] system
+[ ] - pool trigger for ecs

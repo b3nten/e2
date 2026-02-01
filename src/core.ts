@@ -37,6 +37,7 @@ import {
   appLogger,
   assertInstanceOf,
   AutoMap,
+  cast,
   ConstructorOf,
   Err,
   Immutable,
@@ -47,10 +48,8 @@ import {
   LogLevel,
   mustExist,
   noop,
-  Ok,
   Result,
   runCatching,
-  silentLogger,
   SparseSet,
 } from "./lib.ts";
 
@@ -140,27 +139,31 @@ export class Clock {
 /* YP   YP `8888Y' `8888Y' Y88888P    YP    */
 
 export class Handle<T> {
-  constructor(asset: Resource<AssetInstance<T>>) {
+  constructor(asset: Res<AssetInstance<T>>) {
     this.#asset = asset;
   }
 
   get pending() {
-    return this.#asset.get().pending
+    return this.#asset.tryGet()?.pending ?? false
   }
 
   get promise() {
-    return this.#asset.get().promise
+    return this.#asset.tryGet()?.promise ?? Promise.reject(Err("Disposed"))
   }
 
   get error() {
-    const data = this.#asset.get().data
+    const data = this.#asset.tryGet()?.data
     if (data?.ok) return null
     else return data?.error
   }
 
   get ready() {
-    const a = this.#asset.get()
-    return a.data?.ok
+    const a = this.#asset.tryGet()
+    return a?.data?.ok ?? false
+  }
+
+  get ptr(): Readonly<AssetInstance<T>> | null {
+    return this.#asset.tryGet()
   }
 
   get() {
@@ -182,11 +185,11 @@ export class Handle<T> {
     return a.data.value
   }
 
-  get ptr(): Readonly<AssetInstance<T>> {
-    return this.#asset.get()
+  dispose() {
+    this.#asset.dispose()
   }
 
-  #asset: Resource<AssetInstance<T>>
+  #asset: Res<AssetInstance<T>>
 }
 
 export interface AssetType<T extends any = unknown> {
@@ -203,7 +206,7 @@ type AssetInstance<T> = {
   type: AssetType
 }
 
-export class AssetManager {
+export class Assets {
   #resources = new Resources;
 
   load<T>(asset: AssetType<T>): Handle<T> {
@@ -236,10 +239,10 @@ export class AssetManager {
   }
 
   clone<T>(handle: Handle<T>): Handle<T> {
-    return this.get(handle.ptr.type) as Handle<T>
+    return this.get(handle.ptr!.type) as Handle<T>
   }
 
-  #load<T>(asset: AssetType<T>, oldRes: Resource<AssetInstance<T>> | null): AssetInstance<T> {
+  #load<T>(asset: AssetType<T>, oldRes: Res<AssetInstance<T>> | null): AssetInstance<T> {
     const old = oldRes?.tryGet();
 
     if (old?.pending) {
@@ -423,9 +426,7 @@ class MutRef<T> {
   }
 
   deref(): T {
-    this.world.changedComponents
-      .get(ConstructorOf(this.value!))
-      .add(this.value!);
+    this.world.markChanged(this.value!)
     return this.value;
   }
 
@@ -539,21 +540,21 @@ export class Triggerer {
 /* 88 `88. 88.     db   8D */
 /* 88   YD Y88888P `8888Y' */
 
-type ResourcePtr<T = unknown> = {
+type ResPtr<T = unknown> = {
   data: T | undefined;
   valid: boolean;
   refCount: number;
   key: any;
 };
 
-export class Resource<T = unknown> {
-  #ptr: ResourcePtr<T>;
+export class Res<T = unknown> {
+  #ptr: ResPtr<T>;
   #disposed = false;
   #res: Resources
 
   private constructor(
     res: Resources,
-    ptr: ResourcePtr<T>,
+    ptr: ResPtr<T>,
     disposalFn: VoidFunction
   ) {
     this.#ptr = ptr;
@@ -588,12 +589,12 @@ export class Resource<T = unknown> {
     return this.#ptr.data ?? null
   }
 
-  clone(): Resource<T> {
+  clone(): Res<T> {
     return this.#res.clone(this)
   }
 
   /** @internal */
-  get ptr(): Readonly<ResourcePtr<T>> {
+  get ptr(): Readonly<ResPtr<T>> {
     return this.#ptr
   }
 
@@ -601,17 +602,17 @@ export class Resource<T = unknown> {
 }
 
 export class Resources {
-  #storage = new Map<any, ResourcePtr>;
+  #storage = new Map<any, ResPtr>;
 
-  #registry = new FinalizationRegistry<{ key: any; ptr: ResourcePtr }>(
+  #registry = new FinalizationRegistry<{ key: any; ptr: ResPtr }>(
     (ctx) => {
       this.#decrement(ctx.key, ctx.ptr);
     },
   );
 
-  add<T>(key: any, value: T): Resource<T> {
+  add<T>(key: any, value: T): Res<T> {
     if (this.#storage.has(key)) {
-      const ptr = <ResourcePtr<T>>this.#storage.get(key);
+      const ptr = <ResPtr<T>>this.#storage.get(key);
 
       try {
         (ptr.data as any)?.destructor?.();
@@ -623,31 +624,31 @@ export class Resources {
       return this.#createResource(key, ptr);
     }
 
-    const ptr: ResourcePtr<T> = { data: value, valid: true, refCount: 1, key };
+    const ptr: ResPtr<T> = { data: value, valid: true, refCount: 1, key };
     this.#storage.set(key, ptr);
 
     return this.#createResource(key, ptr);
   }
 
-  get<T = unknown>(key: any): Resource<T> {
+  get<T = unknown>(key: any): Res<T> {
     const ptr = this.#storage.get(key);
     if (!ptr) {
       throw Error(`No Resource for key (${key}) available`);
     }
     ptr.refCount++;
-    return this.#createResource(key, <ResourcePtr<T>>ptr);
+    return this.#createResource(key, <ResPtr<T>>ptr);
   }
 
-  tryGet<T = unknown>(key: any): Resource<T> | null {
+  tryGet<T = unknown>(key: any): Res<T> | null {
     const ptr = this.#storage.get(key);
     if (!ptr) {
       return null;
     }
     ptr.refCount++;
-    return this.#createResource(key, <ResourcePtr<T>>ptr);
+    return this.#createResource(key, <ResPtr<T>>ptr);
   }
 
-  clone<T>(res: Resource<T>): Resource<T> {
+  clone<T>(res: Res<T>): Res<T> {
     return this.get<T>(res.ptr.key)
   }
 
@@ -655,11 +656,11 @@ export class Resources {
     return this.#storage.get(key)
   }
 
-  #createResource<T>(key: any, ptr: ResourcePtr<T>): Resource<T> {
+  #createResource<T>(key: any, ptr: ResPtr<T>): Res<T> {
     const token = {};
 
     // @ts-expect-error private constructor is module scoped
-    const resource = new Resource<T>(this, ptr, () => {
+    const resource = new Res<T>(this, ptr, () => {
       this.#registry.unregister(token);
       this.#decrement(key, ptr);
     });
@@ -669,7 +670,7 @@ export class Resources {
     return resource;
   }
 
-  #decrement(key: any, ptr: ResourcePtr) {
+  #decrement(key: any, ptr: ResPtr) {
     ptr.refCount--;
 
     if (ptr.refCount === 0) {
@@ -680,7 +681,7 @@ export class Resources {
     }
   }
 
-  #destroy(ptr: ResourcePtr) {
+  #destroy(ptr: ResPtr) {
     if (!ptr.valid) return;
 
     try {
@@ -724,9 +725,47 @@ export class EntityDespawnScheduled {
   constructor(public entity: EntityID) {}
 }
 
-export class World {
-  changedComponents = new AutoMap<Object, Set<Object>>(() => new Set());
+type ReadonlySet<T> = Omit<Set<T>, "add" | "clear" | "delete">
 
+class MutatedComponentListImpl {
+
+  #storage = new Map<Object, Set<Object>>;
+
+  add(component: Object) {
+    if (!this.#storage.has(ConstructorOf(component))) {
+      this.#storage.set(ConstructorOf(component), new Set)
+    }
+    this.#storage.get(ConstructorOf(component))?.add(component)
+  }
+
+  clear() {
+    for (const set of this.#storage.values()) {
+      set.clear()
+    }
+  }
+
+  ofType<T extends Object>(componentType: ConstructorOf<T>): ReadonlySet<T> {
+    return this.#storage.get(componentType) ?? EMPTY_SET
+  }
+
+  iter() {
+    return this[Symbol.iterator]()
+  }
+
+  *[Symbol.iterator](): IterableIterator<Object> {
+    for (const s of this.#storage.values()) {
+      for (const c of s) {
+        yield c
+      }
+    }
+  }
+
+}
+
+type MutatedComponentList = Omit<MutatedComponentListImpl, "add" | "clear">
+
+export class World {
+  #mutatedComponentList = new MutatedComponentListImpl;
   #entityCount = 0;
   #entities: Set<EntityID> = new Set();
   #componentMap: AutoMap<ConstructorOf<Object>, SparseSet<Object>> =
@@ -737,6 +776,10 @@ export class World {
   );
   #sharedIterResult: any[] = [];
   #mutWrappers = Array.from({ length: 100 }).map(() => new MutRef(this));
+
+  get mutatedComponentList(): MutatedComponentList {
+    return this.#mutatedComponentList
+  }
 
   public triggerer?: Triggerer;
 
@@ -863,7 +906,7 @@ export class World {
       throw Error(`Component ${componentType.name} does not exist on entity`);
     }
     const component = <T>this.#componentMap.get(componentType).get(entity);
-    this.changedComponents.get(componentType).add(component);
+    this.#mutatedComponentList.get(componentType).add(component);
     return component;
   }
 
@@ -875,7 +918,7 @@ export class World {
       return null;
     }
     const component = <T>this.#componentMap.get(componentType).get(entity);
-    this.changedComponents.get(componentType).add(component);
+    this.#mutatedComponentList.get(componentType).add(component);
     return component;
   }
 
@@ -930,6 +973,24 @@ export class World {
     return this.#removalQueue.get(component).has(entity);
   }
 
+  getEntity(component: Object): EntityID {
+    if (entityIDField in component && component[entityIDField]) {
+      return <EntityID>component[entityIDField]
+    }
+    throw Error(`Object is not component in World`)
+  }
+
+  tryGetEntity(component: Object): EntityID | null {
+    if (entityIDField in component && component[entityIDField]) {
+      return <EntityID>component[entityIDField]
+    }
+    return null
+  }
+
+  markChanged(component: Object) {
+    this.#mutatedComponentList.add(component)
+  }
+
   flush() {
     for (const entity of this.#despawnQueue) {
       if (this.exists(entity)) {
@@ -954,9 +1015,7 @@ export class World {
   }
 
   clear() {
-    for (const sets of this.changedComponents.values()) {
-      sets.clear();
-    }
+    this.#mutatedComponentList.clear()
   }
 
   *queryIter<T extends QueryList>(
@@ -1238,8 +1297,9 @@ export class Configuration {
 }
 
 export class App {
+
   static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
-    app.addResources(Clock, Triggerer, World);
+    app.addResources(Clock, Triggerer, World, Assets);
     app.addSystems(Schedule.Startup, relationshipSystem);
   });
 
@@ -1258,7 +1318,7 @@ export class App {
   #started = false;
   #destroyed = false;
   #resourceManager = new Resources();
-  #staticResources = new Map<ConstructorOf<Object>, Resource<Object>>();
+  #staticResources = new Map<ConstructorOf<Object>, Res<Object>>();
   #config: Configuration;
 
   constructor(
