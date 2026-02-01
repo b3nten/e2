@@ -28,14 +28,12 @@
 import * as Three from "three";
 import {
   type EntityID,
-  Query,
   Relationship,
   System,
-  Triggerer,
   World,
 } from "./core";
 import type { WebGPURenderer } from "three/webgpu";
-import type { Immutable, Mutable, Nullish } from "./lib";
+import { Triggerer, type Immutable, type Mutable, type Nullish } from "./lib";
 
 /*_,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_
 
@@ -117,6 +115,8 @@ export class Transform {
    */
   public readonly matrix = new Three.Matrix4();
 
+  public readonly worldMatrix: Immutable<Three.Matrix4> = new Three.Matrix4();
+
   /** Calculate the local matrix of this transform */
   calculateMatrix(): Three.Matrix4 {
     return this.matrix.compose(this.position, this.rotation, this.scale);
@@ -184,7 +184,7 @@ export class Transform {
     this.rotation.copy(source.rotation);
     this.scale.copy(source.scale);
     this.matrix.copy(source.matrix);
-    this.worldMatrix.copy(source.worldMatrix);
+    this.worldMatrix.copy(<Mutable<Three.Matrix4>>source.worldMatrix);
     return this;
   }
 }
