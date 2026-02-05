@@ -1,14 +1,23 @@
-/*  /\___/\
-   /       \
-  l  u   u  l
---l----*----l--
-   \   w   /     - Meow!
-     ======
-   /       \ __
-   l        l\ \
-   l        l/ /   -Audrey Ming Hwang-
-   l  l l   l /
-   \ ml lm /_*/
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+/*_,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_
+
+Copyright (C) 2026 Benton Boychuk-Chorney
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+_,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
 import {
   App,
@@ -30,32 +39,31 @@ import {
   Assets,
 } from "../src/core.ts";
 
-
 const TestEvent = Event<string>("testEvent");
 
 class Foo {
   lol = 1;
 }
-class Bar { }
+class Bar {}
 
-const assets = new Assets
+const assets = new Assets();
 
 const fooAsset = (value: string) => ({
   path: "Foo",
   load: () => {
-    return new Promise(r => setTimeout(() => r(value), 500))
-  }
-})
+    return new Promise((r) => setTimeout(() => r(value), 500));
+  },
+});
 
-const handle = assets.load(fooAsset("COOL!"))
+const handle = assets.load(fooAsset("COOL!"));
 
-await handle.promise.then(x => {
+await handle.promise.then((x) => {
   if (x.ok) {
-    console.log(x.value)
+    console.log(x.value);
   } else {
-    console.log("WTF")
+    console.log("WTF");
   }
-})
+});
 
 // App.WithDefaults(class extends Configuration { mode = AppMode.Dev })
 //   .addEvents(TestEvent)
