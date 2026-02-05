@@ -49,9 +49,23 @@ This module is for the Three.js integration to Elysia
 _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
 import * as Three from "three";
-import { type EntityID, Relationship, System, World } from "./core";
+import { GLTFLoader, type GLTF } from "three/examples/jsm/Addons";
+import {
+  App,
+  type EntityID,
+  Relationship,
+  Schedule,
+  System,
+  World,
+} from "./core";
 import type { WebGPURenderer } from "three/webgpu";
-import { Triggerer, type Immutable, type Mutable, type Nullish } from "./lib";
+import {
+  Triggerer,
+  type AssetType,
+  type Immutable,
+  type Mutable,
+  type Nullish,
+} from "./lib";
 
 /**
  * Convention for flagging an entity with a sibling Camera component as the active camera.
@@ -274,3 +288,58 @@ export const threeRenderSystemRender = System(
   [ThreeData],
   (threeData) => {},
 );
+
+export const ThreePlugin = {
+  default: (app: App) => {
+    app
+      .addResources(ThreeData)
+      .addSystems(
+        Schedule.PostStartup,
+        threeObjectSyncSystem,
+        threeRenderSystemInit,
+      )
+      .addSystems(
+        Schedule.WorldFlush,
+        transformUpdateSystem,
+        threeRenderSystemRender,
+      );
+  },
+};
+
+const textureLoader = new Three.TextureLoader();
+export type TextureAsset = AssetType<Three.Texture>;
+export const TextureAsset = (path: string): AssetType<Three.Texture> => ({
+  path,
+  load: async () => {
+    return textureLoader.loadAsync(path);
+  },
+  destroy: (asset) => {
+    asset.dispose();
+  },
+});
+
+const gltfLoader = new GLTFLoader();
+export type GLTFAsset = AssetType<GLTF>;
+export const GLTFAsset = (path: string): AssetType<GLTF> => ({
+  path,
+  load: async () => {
+    return gltfLoader.loadAsync(path);
+  },
+  destroy: (asset) => {
+    asset.scenes.forEach((scene) => {
+      scene.traverse((obj) => {
+        if ((<any>obj).geometry) {
+          (<any>obj).geometry.dispose();
+        }
+        if ((<any>obj).material) {
+          const mat = (<any>obj).material;
+          if (Array.isArray(mat)) {
+            mat.forEach((m) => m.dispose());
+          } else {
+            mat.dispose();
+          }
+        }
+      });
+    });
+  },
+});

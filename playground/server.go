@@ -40,9 +40,9 @@ func main() {
 		Loader:      map[string]esbuild.Loader{},
 		Plugins:     []esbuild.Plugin{},
 		Alias: map[string]string{
-			"three": "../include/three@0.182.0/three.js",
-			"three/webgpu": "../include/three@0.182.0/webgpu.js",
-			"three/tsl": "../include/three@0.182.0/tsl.js",
+			"three":              "../include/three@0.182.0/three.js",
+			"three/webgpu":       "../include/three@0.182.0/webgpu.js",
+			"three/tsl":          "../include/three@0.182.0/tsl.js",
 			"three/examples/jsm": "../include/three@0.182.0/examples/jsm",
 		},
 	}
@@ -54,6 +54,8 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+
+	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir("assets"))))
 
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "text/html")

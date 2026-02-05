@@ -971,9 +971,7 @@ export function isExactly<Input, Output>(
   return (input as unknown) === (value as unknown);
 }
 
-export function isConstructor<T>(
-  value: unknown,
-): value is new (...args: any[]) => T {
+export function isConstructor<T>(value: unknown): value is ConstructorOf<T> {
   return typeof value === "function" && "prototype" in value;
 }
 
@@ -2093,6 +2091,8 @@ export class Clock {
 /* 88   88 db   8D db   8D 88.        88    */
 /* YP   YP `8888Y' `8888Y' Y88888P    YP    */
 
+export type HandleOf<T> = T extends AssetType<infer U> ? Handle<U> : never;
+
 export class Handle<T> {
   constructor(asset: Res<AssetInstance<T>>) {
     this.#asset = asset;
@@ -2224,6 +2224,7 @@ export class Assets {
           asset.destroy?.(old.data.value);
         } catch {}
       }
+      assetInstance.data = Ok(data);
       return data;
     }).finally(() => {
       assetInstance.pending = false;

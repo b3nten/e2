@@ -642,7 +642,7 @@ export class Configuration {
 
 export class App {
   static defaultsPlugin = Plugin("DefaultsPlugin", (app: App) => {
-    app.addResources(Clock, Triggerer, World, Assets);
+    app.addResources(Clock, Triggerer, World);
     app.addSystems(Schedule.Startup, relationshipSystem);
   });
 
@@ -711,7 +711,7 @@ export class App {
     return this;
   }
 
-  addResources(...resources: ConstructorOf<Object>[]): App {
+  addResources(...resources: ConstructorOf<Object>[] | Object[]): App {
     if (this.#started || this.#destroyed) {
       this.#logger.warn(
         "Attempted to add a resource to App, which is either running or destroyed",
@@ -719,8 +719,19 @@ export class App {
       return this;
     }
     for (const r of resources) {
-      this.#logger.info(`Registering resource ${r.name}`);
-      this.#staticResources.set(r, this.#resourceManager.create(r));
+      if (isConstructor(r)) {
+        this.#logger.info(`Registering resource ${r.name}`);
+        this.#staticResources.set(
+          <ConstructorOf<Object>>r,
+          this.#resourceManager.create(<ConstructorOf<Object>>r),
+        );
+      } else {
+        this.#logger.info(`Registering resource ${r.constructor.name}`);
+        this.#staticResources.set(
+          ConstructorOf(r),
+          this.#resourceManager.add(ConstructorOf(r), r),
+        );
+      }
     }
     return this;
   }

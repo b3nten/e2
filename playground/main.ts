@@ -21,80 +21,53 @@ _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
 import {
   App,
-  Clock,
-  EvReader,
-  Mut,
-  Query,
+  AppMode,
+  Configuration,
   Schedule,
   System,
   World,
-  Event,
-  EvWriter,
-  Triggerer,
-  EntitySpawned,
-  ComponentInserted,
-  Configuration,
-  AppMode,
-  Resources,
-  Assets,
 } from "../src/core.ts";
+import { Assets, Event, Handle } from "../src/lib.ts";
+import { TextureAsset, ThreePlugin } from "../src/three.ts";
+import * as Three from "three";
 
-const TestEvent = Event<string>("testEvent");
+const SomeEvent = Event<{ value: string }>("SomeEvent");
 
-class Foo {
-  lol = 1;
+class StaticAssets {
+  texture!: Handle<Three.Texture>;
 }
-class Bar {}
 
-const assets = new Assets();
-
-const fooAsset = (value: string) => ({
-  path: "Foo",
-  load: () => {
-    return new Promise((r) => setTimeout(() => r(value), 500));
+const startupSystem = System(
+  "Startup",
+  [Assets, StaticAssets],
+  (assets, staticAssets) => {
+    staticAssets.texture = assets.load(TextureAsset("/assets/crate.jpg"));
+    staticAssets.texture.promise.then((texture) => {
+      console.log(
+        "Texture loaded:",
+        texture.ok ? texture.value : texture.error,
+      );
+    });
   },
-});
+);
 
-const handle = assets.load(fooAsset("COOL!"));
+const updateSystem = System(
+  "Update",
+  [World, StaticAssets],
+  (world, staticAssets) => {},
+);
 
-await handle.promise.then((x) => {
-  if (x.ok) {
-    console.log(x.value);
-  } else {
-    console.log("WTF");
-  }
-});
+const cleanupSystem = System("Cleanup", [World], (world) => {});
 
-// App.WithDefaults(class extends Configuration { mode = AppMode.Dev })
-//   .addEvents(TestEvent)
-//   .addSystems(
-//     Schedule.Startup,
-//     System("Init", [World, Triggerer], (w, t) => {
-//       t.addResponder([EntitySpawned], (es) => {
-//         console.log(es)
-//       })
-//       t.addResponder([ComponentInserted, Foo], (es, f) => {
-//         console.log(es, f)
-//       })
-//       w.spawn(new Foo());
-//       w.spawn(new Bar(), new Foo());
-//     }),
-//   )
-//   .addSystems(
-//     Schedule.Update,
-//     System("Test", [Clock, World, Query(Bar, Mut(Foo))], (c, w, query) => {
-//       // for (const [entity, bar, foo] of query) {
-//       //   // console.log(entity, foo.deref());
-//       //   if (foo.ref.lol < 5) {
-//       //     foo.deref().lol++;
-//       //   }
-//       // }
-//     }),
-//   )
-//   .addSystems(
-//     Schedule.WorldFlush,
-//     System("Test", [Clock, World, Query(Bar, Mut(Foo)), Resources], (c, w, query, res) => {
-//       console.log(w.changedComponents.get(Foo));
-//     }),
-//   )
-//   .run();
+App.WithDefaults(
+  new (class extends Configuration {
+    mode = AppMode.Dev;
+  })(),
+)
+  .addResources(Assets, StaticAssets)
+  .addEvents(SomeEvent)
+  .addPlugins(ThreePlugin.default)
+  .addSystems(Schedule.Startup, startupSystem)
+  .addSystems(Schedule.Update, updateSystem)
+  .addSystems(Schedule.Destroy, cleanupSystem)
+  .run();
