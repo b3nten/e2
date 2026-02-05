@@ -31,6 +31,10 @@ import { Assets, Event, Handle } from "../src/lib.ts";
 import { TextureAsset, ThreePlugin } from "../src/three.ts";
 import * as Three from "three";
 
+class Config extends Configuration {
+  mode = AppMode.Dev;
+}
+
 const SomeEvent = Event<{ value: string }>("SomeEvent");
 
 class StaticAssets {
@@ -59,11 +63,7 @@ const updateSystem = System(
 
 const cleanupSystem = System("Cleanup", [World], (world) => {});
 
-App.WithDefaults(
-  new (class extends Configuration {
-    mode = AppMode.Dev;
-  })(),
-)
+App.WithDefaults(Config)
   .addResources(Assets, StaticAssets)
   .addEvents(SomeEvent)
   .addPlugins(ThreePlugin.default)
