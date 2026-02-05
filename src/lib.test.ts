@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
-import { assertEquals, assertExists, assertThrows } from "jsr:@std/assert";
+import { assertEquals, assertExists } from "jsr:@std/assert";
 import { CompositeMap } from "./lib.ts";
 import { ObjectPool } from "./lib.ts";
 

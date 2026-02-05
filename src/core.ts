@@ -51,7 +51,7 @@ This module forms the core of Elysiatech. Documentation coming soon.
 _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
 import {
-  type DeepImmutable,
+  type Immutable,
   type InstanceOf,
   assertInstanceOf,
   Assets,
@@ -157,8 +157,8 @@ class MutRef<T> {
     return this.value;
   }
 
-  get ref(): DeepImmutable<T> {
-    return <DeepImmutable<T>>this.value;
+  get ref(): Immutable<T> {
+    return <Immutable<T>>this.value;
   }
 
   private world!: World;
@@ -177,7 +177,7 @@ type InferQuery<T extends QueryList> = {
   [K in keyof T]: T[K] extends MutParam<infer U>
     ? MutRef<InstanceOf<U>>
     : T[K] extends ConstructorOf<Object>
-      ? DeepImmutable<InstanceOf<T[K]>>
+      ? Immutable<InstanceOf<T[K]>>
       : never;
 };
 
@@ -406,21 +406,21 @@ export class World {
   get<T extends Object>(
     entity: EntityID,
     componentType: ConstructorOf<T>,
-  ): DeepImmutable<T> {
+  ): Immutable<T> {
     if (!this.#componentMap.get(componentType).has(entity)) {
       throw Error(`Component ${componentType.name} does not exist on entity`);
     }
-    return <DeepImmutable<T>>this.#componentMap.get(componentType).get(entity);
+    return <Immutable<T>>this.#componentMap.get(componentType).get(entity);
   }
 
   tryGet<T extends Object>(
     entity: EntityID,
     component: ConstructorOf<T>,
-  ): DeepImmutable<T> | null {
+  ): Immutable<T> | null {
     if (!this.#componentMap.get(component).has(entity)) {
       return null;
     }
-    return <DeepImmutable<T>>this.#componentMap.get(component).get(entity);
+    return <Immutable<T>>this.#componentMap.get(component).get(entity);
   }
 
   getMut<T extends Object>(
