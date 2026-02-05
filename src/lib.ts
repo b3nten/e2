@@ -57,12 +57,12 @@ export type Primitive =
   | undefined;
 
 /**
- * Type representing falsy values in TypeScript: `false | "" | 0 | null | undefined`
+ * Type representing falsy values: `false | "" | 0 | null | undefined`
  */
 export type Falsy = false | "" | 0 | null | undefined;
 
 /**
- * Type representing [nullish values][https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-7.html#nullish-coalescing] in TypeScript: `null | undefined`
+ * Type representing nullish values: `null | undefined`
  */
 export type Nullish = null | undefined;
 
@@ -97,11 +97,6 @@ export type Serializable =
   | undefined
   | Serializable[]
   | { [key: string]: Serializable };
-
-/**
- * Credits to all the people who given inspiration and shared some very useful code snippets
- * in the following github issue: https://github.com/Microsoft/TypeScript/issues/12215
- */
 
 /**
  * Set intersection of given union types `A` and `B`
@@ -175,8 +170,6 @@ export type NonFunctionKeys<T extends object> = {
 
 /**
  * Get union type of keys that are mutable in object type `T`
- * Credit: Matt McCutchen
- * https://stackoverflow.com/questions/52443276/how-to-exclude-getter-only-properties-from-type-in-typescript
  * @example
  *   type Props = { readonly foo: string; bar: number };
  *
@@ -195,8 +188,6 @@ export type WritableKeys<T extends object> = MutableKeys<T>;
 
 /**
  * Get union type of keys that are readonly in object type `T`
- * Credit: Matt McCutchen
- * https://stackoverflow.com/questions/52443276/how-to-exclude-getter-only-properties-from-type-in-typescript
  * @example
  *   type Props = { readonly foo: string; bar: number };
  *
@@ -217,7 +208,6 @@ type IfEquals<X, Y, A = X, B = never> =
 
 /**
  * Get union type of keys that are required in object type `T`
- * @see https://stackoverflow.com/questions/52984808/is-there-a-way-to-get-all-required-properties-of-a-typescript-object
  * @example
  *   type Props = { req: number; reqUndef: number | undefined; opt?: string; optUndef?: number | undefined; };
  *
@@ -230,7 +220,6 @@ export type RequiredKeys<T> = {
 
 /**
  * Get union type of keys that are optional in object type `T`
- * @see https://stackoverflow.com/questions/52984808/is-there-a-way-to-get-all-required-properties-of-a-typescript-object
  * @example
  *   type Props = { req: number; reqUndef: number | undefined; opt?: string; optUndef?: number | undefined; };
  *
@@ -243,8 +232,6 @@ export type OptionalKeys<T> = {
 
 /**
  * Get keys of all objects in the union type `U`
- * Credit: filipomar
- * @see https://github.com/piotrwitek/utility-types/issues/192
  * @example
  *   // Expect: 'name' | 'age' | 'visible'
  *   UnionKeys<{ name: string; age: string } | { age: number } | { visible: boolean }>
@@ -263,7 +250,6 @@ namespace Pick {}
 
 /**
  * From `T` pick a set of properties by value matching `ValueType`.
- * Credit: [Piotr Lewandowski](https://medium.com/dailyjs/typescript-create-a-condition-based-subset-types-9d902cea5b8c)
  * @example
  *   type Props = { req: number; reqUndef: number | undefined; opt?: string; };
  *
@@ -310,7 +296,6 @@ export type Omit<T, K extends keyof any> = Pick<T, SetDifference<keyof T, K>>;
 
 /**
  * From `T` remove a set of properties by value matching `ValueType`.
- * Credit: [Piotr Lewandowski](https://medium.com/dailyjs/typescript-create-a-condition-based-subset-types-9d902cea5b8c)
  * @example
  *   type Props = { req: number; reqUndef: number | undefined; opt?: string; };
  *
@@ -443,41 +428,6 @@ export type Unionize<T extends object> = {
  */
 export type PromiseType<T extends Promise<any>> =
   T extends Promise<infer U> ? U : never;
-
-// TODO: inline _DeepReadonlyArray with infer in DeepReadonly, same for all other deep types
-/**
- * Readonly that works for deeply nested structure
- * @example
- *   // Expect: {
- *   //   readonly first: {
- *   //     readonly second: {
- *   //       readonly name: string;
- *   //     };
- *   //   };
- *   // }
- *   type NestedProps = {
- *     first: {
- *       second: {
- *         name: string;
- *       };
- *     };
- *   };
- *   type ReadonlyNestedProps = DeepReadonly<NestedProps>;
- */
-export type DeepReadonly<T> = T extends ((...args: any[]) => any) | Primitive
-  ? T
-  : T extends _DeepReadonlyArray<infer U>
-    ? _DeepReadonlyArray<U>
-    : T extends _DeepReadonlyObject<infer V>
-      ? _DeepReadonlyObject<V>
-      : T;
-/** @private */
-// tslint:disable-next-line:class-name
-export interface _DeepReadonlyArray<T> extends ReadonlyArray<DeepReadonly<T>> {}
-/** @private */
-export type _DeepReadonlyObject<T> = {
-  readonly [P in keyof T]: DeepReadonly<T[P]>;
-};
 
 /**
  * Required that works for deeply nested structure
@@ -687,8 +637,6 @@ export type AugmentedRequired<
 
 /**
  * Get intersection type given union type `U`
- * Credit: jcalz
- * @see https://stackoverflow.com/a/50375286/7381355
  * @example
  *   // Expect: { name: string } & { age: number } & { visible: boolean }
  *   UnionToIntersection<{ name: string } | { age: number } | { visible: boolean }>
@@ -746,7 +694,7 @@ type Check<Input = unknown, Output = Input> = (
 /* 88   88 db   8D db   8D 88.     88 `88.    88    */
 /* YP   YP `8888Y' `8888Y' Y88888P 88   YD    YP    */
 
-const expectedToBe = (type: string): string => `expected to be ${type}`;
+const expectedMsg = (type: string): string => `expected to be ${type}`;
 
 export function assert(condition: any, message?: string): asserts condition {
   if (!condition) {
@@ -756,28 +704,28 @@ export function assert(condition: any, message?: string): asserts condition {
 
 export function assertUnreachable(
   _input: never,
-  message: string = expectedToBe("unreachable"),
+  message: string = expectedMsg("unreachable"),
 ): never {
   throw new TypeError(message);
 }
 
 export function assertNotNull<T>(
   input: null | T,
-  message: string = expectedToBe("not null"),
+  message: string = expectedMsg("not null"),
 ): asserts input is T {
   assert(input !== null, message);
 }
 
 export function assertNotUndefined<T>(
   input: undefined | T,
-  message: string = expectedToBe("not undefined"),
+  message: string = expectedMsg("not undefined"),
 ): asserts input is T {
   assert(input !== undefined, message);
 }
 
 export function assertNotVoid<T>(
   input: T,
-  message: string = expectedToBe("neither null nor undefined"),
+  message: string = expectedMsg("neither null nor undefined"),
 ): asserts input is Exclude<T, undefined | null | undefined> {
   assert(input !== null && input !== undefined, message);
 }
@@ -785,42 +733,42 @@ export function assertNotVoid<T>(
 export function assertExactly<Input, Output>(
   input: Input,
   value: Output,
-  message = expectedToBe(`exactly ${value}`),
+  message = expectedMsg(`exactly ${value}`),
 ): asserts input is SubType<Input, Output> {
   assert((input as unknown) === (value as unknown), message);
 }
 
 export function assertBoolean(
   input: unknown,
-  message: string = expectedToBe("a boolean"),
+  message: string = expectedMsg("a boolean"),
 ): asserts input is boolean {
   assert(typeof input === "boolean", message);
 }
 
 export function assertNumber(
   input: unknown,
-  message: string = expectedToBe("a number"),
+  message: string = expectedMsg("a number"),
 ): asserts input is number {
   assert(typeof input === "number", message);
 }
 
 export function assertString(
   input: unknown,
-  message: string = expectedToBe("a string"),
+  message: string = expectedMsg("a string"),
 ): asserts input is string {
   assert(typeof input === "string", message);
 }
 
 export function assertDate(
   input: unknown,
-  message: string = expectedToBe("a Date"),
+  message: string = expectedMsg("a Date"),
 ): asserts input is Date {
   assert(input instanceof Date, message);
 }
 
 export function assertRecord(
   input: unknown,
-  message: string = expectedToBe("a record"),
+  message: string = expectedMsg("a record"),
 ): asserts input is Record<string, unknown> {
   assert(typeof input === "object", message);
   assert(!Array.isArray(input), message);
@@ -830,10 +778,10 @@ export function assertRecord(
   }
 }
 
-export function assertRecordWithKeys<K extends string>(
+export function assertRecordWith<K extends string>(
   input: unknown,
   keys: K[],
-  message = expectedToBe(`a record with keys ${keys.join(", ")}`),
+  message = expectedMsg(`a record with keys ${keys.join(", ")}`),
 ): asserts input is {
   readonly [Key in K]: unknown;
 } {
@@ -845,7 +793,7 @@ export function assertRecordWithKeys<K extends string>(
 
 export function assertArray(
   input: unknown,
-  message: string = expectedToBe("an array"),
+  message: string = expectedMsg("an array"),
 ): asserts input is unknown[] {
   assert(Array.isArray(input), message);
 }
@@ -853,8 +801,8 @@ export function assertArray(
 export function assertRecordOfType<T>(
   input: unknown,
   assertT: Assert<unknown, T>,
-  message = expectedToBe("a record of given type"),
-  itemMessage = expectedToBe("of given type"),
+  message = expectedMsg("a record of given type"),
+  itemMessage = expectedMsg("of given type"),
 ): asserts input is Record<string, T> {
   assertRecord(input, message);
   for (const item of Object.values(input)) {
@@ -862,11 +810,11 @@ export function assertRecordOfType<T>(
   }
 }
 
-export function assertArrayOfType<T>(
+export function assertArrayOf<T>(
   input: unknown,
   assertT: Assert<unknown, T>,
-  message = expectedToBe("an array of given type"),
-  itemMessage = expectedToBe("of given type"),
+  message = expectedMsg("an array of given type"),
+  itemMessage = expectedMsg("of given type"),
 ): asserts input is T[] {
   assertArray(input, message);
   for (const item of input) {
@@ -874,10 +822,10 @@ export function assertArrayOfType<T>(
   }
 }
 
-export function assertOptionOfType<Input, Output>(
+export function assertOptionOf<Input, Output>(
   input: Input | undefined,
   assertT: Assert<Input, Output>,
-  message = expectedToBe("option of given type"),
+  message = expectedMsg("option of given type"),
 ): asserts input is SubType<Input, Output | undefined> {
   if (input === undefined) {
     return;
@@ -888,7 +836,7 @@ export function assertOptionOfType<Input, Output>(
 export function assertOneOf<Input, Output>(
   input: Input,
   values: readonly Output[],
-  message: string = expectedToBe(`one of ${values.join(", ")}`),
+  message: string = expectedMsg(`one of ${values.join(", ")}`),
 ): asserts input is SubType<Input, Output> {
   assert(values.includes(input as SubType<Input, Output>), message);
 }
@@ -896,7 +844,7 @@ export function assertOneOf<Input, Output>(
 export function assertOneOfType<T>(
   input: unknown,
   assertT: Assert<unknown, T>[],
-  message: string = expectedToBe("one of type"),
+  message: string = expectedMsg("one of type"),
   itemMessage?: string,
 ): asserts input is T {
   for (const assert of assertT) {
@@ -911,14 +859,14 @@ export function assertOneOfType<T>(
 export function assertInstanceOf<T>(
   input: unknown,
   constructor: new (...args: any[]) => T,
-  message = expectedToBe("an instance of given constructor"),
+  message = expectedMsg("an instance of given constructor"),
 ): asserts input is T {
   assert(input instanceof constructor, message);
 }
 
 export function assertPromise(
   input: unknown,
-  message = expectedToBe("a promise"),
+  message = expectedMsg("a promise"),
 ): asserts input is Promise<unknown> {
   assertInstanceOf(input, Promise, message);
 }
@@ -950,7 +898,7 @@ export function assertFieldsNotEmpty<T, K extends keyof T>(
 
 export function mustExist<T>(
   value: T,
-  message: string = expectedToBe("not null"),
+  message: string = expectedMsg("not null"),
 ): NonNullable<T> {
   assertNotVoid(value, message);
   return value as NonNullable<T>;
@@ -1135,11 +1083,6 @@ export function runAndForget<T>(callback: () => Promise<T>) {
 }
 
 /* Gets the constructor of an object. */
-export function constructorOf<T extends Object>(ctor: T): ConstructorOf<T> {
-  return ctor.constructor as ConstructorOf<T>;
-}
-
-/* Gets the constructor of an object. */
 export function ConstructorOf<T extends Object>(ctor: T): ConstructorOf<T> {
   return ctor.constructor as ConstructorOf<T>;
 }
@@ -1223,11 +1166,6 @@ export function lerpSmooth(
 /* 88~~~~~ 88~~~88   `Y8b. 88~~~~~ */
 /* 88.     88   88 db   8D 88.     */
 /* Y88888P YP   YP `8888Y' Y88888P */
-
-/***********************************************************
- Thanks to https://easings.net/
- with love <3
- ************************************************************/
 
 type EasingFunction = (progress: number) => number;
 
@@ -1334,14 +1272,11 @@ export const bounceOut: EasingFunction = (x) => {
     return n1 * x * x;
   }
   if (x < 2 / d1) {
-    // biome-ignore lint/suspicious/noAssignInExpressions: performant
     return n1 * (x -= 1.5 / d1) * x + 0.75;
   }
   if (x < 2.5 / d1) {
-    // biome-ignore lint/suspicious/noAssignInExpressions: performant
     return n1 * (x -= 2.25 / d1) * x + 0.9375;
   }
-  // biome-ignore lint/suspicious/noAssignInExpressions: performant
   return n1 * (x -= 2.625 / d1) * x + 0.984375;
 };
 
