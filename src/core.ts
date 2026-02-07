@@ -230,6 +230,96 @@ and the Relationship component enables parent-child entity hierarchies. Both are
 registered automatically by App.defaultsPlugin. See the Input and Relationship
 class documentation for details.
 
+# Ref & RefRegistry
+
+Ref is a reference-counted smart pointer for shared ownership of values. It
+uses FinalizationRegistry for automatic cleanup when all references are garbage
+collected, but also supports explicit lifetime management via drop().
+
+  - deref()  — unwraps the underlying value (throws if dropped or invalidated)
+  - clone()  — creates a new reference, incrementing the ref count
+  - drop()   — explicitly releases this reference, decrementing the ref count
+
+When the ref count reaches zero, the registry calls the value's destructor()
+method (if present) and invalidates all remaining references.
+
+RefRegistry is the backing store that tracks ref counts and mediates
+destruction. You can create standalone registries, or use the global
+convenience function make() which is bound to a global registry.
+
+    import { RefRegistry, make } from "./lib.ts";
+
+    // Using a registry directly
+    const registry = new RefRegistry();
+    const ref = registry.create(MyResource, "arg1", "arg2");
+    const ref2 = ref.clone();
+    ref.deref().doSomething();
+    ref.drop();       // ref count decremented, still alive via ref2
+    ref2.drop();      // ref count reaches 0 — destructor() called
+
+    // Using the global convenience function
+    const globalRef = make(new SomeValue());
+    globalRef.deref();
+    globalRef.drop();
+
+The ResourceManager used internally by App is built on top of RefRegistry.
+See the Ref, RefRegistry, and ResourceManager classes in lib.ts for full
+documentation.
+
+# Asset System
+
+The asset system provides asynchronous, reference-counted asset loading with
+built-in deduplication and cancellation support. It is built on three pieces:
+
+  AssetLoader — an interface describing how to load and destroy an asset:
+    - path:    a unique string key for deduplication
+    - load():  an async function that fetches the asset (receives an AbortSignal)
+    - destroy(): optional cleanup when the asset is no longer needed
+
+  Handle — a lightweight wrapper returned by Assets.load(). It tracks the
+  loading state of an asset and provides access to the loaded value:
+    - pending   — true while the asset is still loading
+    - ready     — true when the asset loaded successfully
+    - error     — the error if loading failed, or null
+    - promise   — the underlying loading promise
+    - get()     — returns the loaded value (throws if pending or errored)
+    - tryGet()  — returns the loaded value or null
+    - dispose() — releases this handle's reference to the asset
+
+  Assets — the asset manager. Call load() with an AssetLoader to get a Handle.
+  If the same path is loaded again, the existing asset is reused (deduplicated)
+  and a new reference is returned. When all handles for an asset are disposed,
+  the asset's destroy() callback is invoked.
+
+    import { Assets } from "./lib.ts";
+
+    // Define an asset loader
+    const ImageAsset = (path: string) => ({
+      path,
+      load: async (signal: AbortSignal) => {
+        const res = await fetch(path, { signal });
+        return createImageBitmap(await res.blob());
+      },
+      destroy: (img: ImageBitmap) => img.close(),
+    });
+
+    // Load assets
+    const assets = new Assets();
+    const handle = assets.load(ImageAsset("/textures/hero.png"));
+
+    // Wait for it, then use it
+    await handle.promise;
+    if (handle.ready) {
+      const bitmap = handle.get();
+    }
+
+    // Done with it
+    handle.dispose();
+
+The three.ts module provides ready-made asset loaders like TextureAsset() and
+GLTFAsset(). See the Handle, Assets, and AssetLoader types in lib.ts for full
+documentation.
+
 # Example
 
     // --- Define components ---
@@ -256,14 +346,6 @@ class documentation for details.
         }
       }
     );
-
-    // --- Define a plugin ---
-    const GamePlugin = Plugin("Game", (app) => {
-      app
-        .addSystems(Schedule.Startup, spawnEntities)
-        .addSystems(Schedule.Update, movementSystem)
-        .addEvents(HitWallEvent);
-    });
 
     // --- Run the app ---
     App.WithDefaults(CustomConfig)

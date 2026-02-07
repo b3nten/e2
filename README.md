@@ -132,6 +132,61 @@ It is registered automatically by `App.defaultsPlugin`.
 The `Relationship` component enables parent-child entity hierarchies with cycle detection
 and automatic cleanup on despawn. Registered automatically by `App.defaultsPlugin`.
 
+### Ref & RefRegistry
+
+`Ref` is a reference-counted smart pointer for shared ownership of values. It uses
+`FinalizationRegistry` for automatic cleanup when all references are garbage collected,
+but also supports explicit lifetime management via `.drop()`.
+
+- `.deref()` — unwraps the underlying value (throws if dropped or invalidated).
+- `.clone()` — creates a new reference, incrementing the ref count.
+- `.drop()` — explicitly releases this reference, decrementing the ref count.
+
+When the ref count reaches zero, the registry calls the value's `destructor()` method
+(if present) and invalidates all remaining references. `RefRegistry` is the backing
+store that tracks ref counts and mediates destruction. A global convenience function
+`make()` is also available for quick one-off usage.
+
+The `ResourceManager` used internally by `App` is built on top of `RefRegistry`.
+
+### Asset System
+
+The asset system provides asynchronous, reference-counted asset loading with built-in
+deduplication and cancellation support. It is built on three pieces:
+
+- **`AssetLoader`** — an interface describing how to load and destroy an asset. It defines a
+  `path` (used as a deduplication key), a `load()` function (receives an `AbortSignal`), and
+  an optional `destroy()` callback for cleanup.
+- **`Handle`** — a lightweight wrapper returned by `Assets.load()`. It tracks loading state
+  (`pending`, `ready`, `error`) and provides access to the loaded value via `get()` / `tryGet()`.
+  Call `dispose()` to release the handle's reference.
+- **`Assets`** — the asset manager. Call `load()` with an `AssetLoader` to get a `Handle`.
+  Duplicate loads for the same path reuse the existing asset. When all handles are disposed,
+  the asset's `destroy()` callback is invoked.
+
+```ts
+const ImageAsset = (path: string) => ({
+  path,
+  load: async (signal: AbortSignal) => {
+    const res = await fetch(path, { signal });
+    return createImageBitmap(await res.blob());
+  },
+  destroy: (img: ImageBitmap) => img.close(),
+});
+
+const assets = new Assets();
+const handle = assets.load(ImageAsset("/textures/hero.png"));
+
+await handle.promise;
+if (handle.ready) {
+  const bitmap = handle.get();
+}
+
+handle.dispose();
+```
+
+The `three.ts` module provides ready-made asset loaders like `TextureAsset()` and `GLTFAsset()`.
+
 ## Modules
 
 | File | Description |
