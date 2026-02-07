@@ -24,6 +24,7 @@ package main
 import (
 	"fmt"
 	"net/http"
+	"os"
 
 	esbuild "github.com/evanw/esbuild/pkg/api"
 )
@@ -57,12 +58,27 @@ func main() {
 
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(http.Dir("assets"))))
 
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+	writeError := func(w http.ResponseWriter, message string) {
 		w.Header().Add("Content-Type", "text/html")
-		w.Write(shell)
+		w.Write([]byte("<h1>500 Internal Server Error</h1><p>" + message + "</p>"))
+	}
+
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		index, err := os.OpenFile("index.html", os.O_RDONLY, 0644)
+		if err != nil {
+			writeError(w, "Failed to open index.html")
+			return
+		}
+		defer index.Close()
+		w.Header().Add("Content-Type", "text/html")
+		_, err = index.WriteTo(w)
+		if err != nil {
+			writeError(w, "Failed to read index.html")
+			return
+		}
 	})
 
-	mux.HandleFunc("GET /main.js", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /main.ts", func(w http.ResponseWriter, r *http.Request) {
 		result := clientCtx.Rebuild()
 		if len(result.Errors) > 0 {
 			w.Header().Add("Content-Type", "application/javascript")
@@ -78,15 +94,3 @@ func main() {
 
 	http.ListenAndServe(":8000", mux)
 }
-
-var shell = []byte(`
-<!DOCTYPE html>
-<html>
-	<head>
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<title>Hello!</title>
-		<script type="module" src="/main.js"></script>
-	</head>
-  	<body></body>
-</html>
-`)

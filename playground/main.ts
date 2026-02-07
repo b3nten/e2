@@ -19,55 +19,126 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
+import * as Three from "three";
 import {
   App,
   AppMode,
   Configuration,
+  Mut,
+  Query,
+  Relationship,
   Schedule,
   System,
   World,
 } from "../src/core.ts";
-import { Assets, Event, Handle } from "../src/lib.ts";
-import { TextureAsset, ThreePlugin } from "../src/three.ts";
-import * as Three from "three";
+import { Assets, Time, type Immutable, type Mutable } from "../src/lib.ts";
+import {
+  ActiveCameraComponent,
+  SyncCameraComponent,
+  SceneData,
+  ThreePlugin,
+  Transform,
+  FreeLookTarget,
+  InfiniteGridMesh,
+  PhysicalSky,
+} from "../src/three.ts";
 
 class Config extends Configuration {
   mode = AppMode.Dev;
 }
 
-const SomeEvent = Event<{ value: string }>("SomeEvent");
+class RenderPipeline {
+  canvas = document.getElementById("viewport") as HTMLCanvasElement;
 
-class StaticAssets {
-  texture!: Handle<Three.Texture>;
+  renderer = new Three.WebGLRenderer({
+    canvas: this.canvas,
+    antialias: true,
+  });
+
+  render(scene: Three.Scene, camera: Three.Camera) {
+    this.renderer.render(scene, camera);
+  }
+
+  static RenderSystem = System(
+    "RenderSystem",
+    [World, RenderPipeline, SceneData, Query(ActiveCameraComponent)],
+    (world, renderPipeline, { scene }, cameraQuery) => {
+      let camera: Immutable<Three.Camera> | null = null;
+
+      const first = cameraQuery.iter().next();
+      if (!first.done) {
+        const [entity] = first.value;
+        camera =
+          world.tryGet(entity, Three.PerspectiveCamera) ??
+          world.tryGet(entity, Three.OrthographicCamera);
+      }
+
+      if (!camera) {
+        console.warn("No active camera found for Three render system");
+        return;
+      }
+
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      renderPipeline.canvas.width = width;
+      renderPipeline.canvas.height = height;
+      renderPipeline.renderer.setSize(width, height, false);
+
+      renderPipeline.render(scene, <Mutable<Three.Camera>>camera);
+    },
+  );
 }
 
 const startupSystem = System(
   "Startup",
-  [Assets, StaticAssets],
-  (assets, staticAssets) => {
-    staticAssets.texture = assets.load(TextureAsset("/assets/crate.jpg"));
-    staticAssets.texture.promise.then((texture) => {
-      console.log(
-        "Texture loaded:",
-        texture.ok ? texture.value : texture.error,
-      );
-    });
+  [World, RenderPipeline],
+  (world, ThreeData) => {
+    world.spawn(new InfiniteGridMesh());
+
+    world.spawn(
+      Transform.WithPosition(0, 0, 5),
+      new Three.PerspectiveCamera(75, 16 / 9, 0.1, 1000),
+      new ActiveCameraComponent(),
+      new SyncCameraComponent(ThreeData.canvas),
+      new FreeLookTarget(),
+    );
+
+    const parent = world.spawn(
+      new Three.Mesh(
+        new Three.BoxGeometry(1, 1, 1),
+        new Three.MeshBasicMaterial({ color: "red" }),
+      ),
+      Transform.WithPosition(0, 0, 0),
+    );
+
+    const child = world.spawn(
+      new Three.Mesh(
+        new Three.BoxGeometry(1, 1, 1),
+        new Three.MeshBasicMaterial({ color: "green" }),
+      ),
+      Transform.WithPosition(0, 1, 0),
+    );
+
+    Relationship.Parent(world, parent, child);
+
+    world.spawn(new Three.AmbientLight("white", 4), new PhysicalSky());
   },
 );
 
 const updateSystem = System(
   "Update",
-  [World, StaticAssets],
-  (world, staticAssets) => {},
+  [Time, Query(Mut(Transform), Three.Mesh)],
+  (time, meshes) => {
+    for (const [, transform] of meshes) {
+      transform.deref().rotate(0, 1 * time.delta, 0);
+    }
+  },
 );
 
-const cleanupSystem = System("Cleanup", [World], (world) => {});
-
 App.WithDefaults(Config)
-  .addResources(Assets, StaticAssets)
-  .addEvents(SomeEvent)
-  .addPlugins(ThreePlugin.default)
+  .addResources(Assets, RenderPipeline)
+  .addPlugins(ThreePlugin.Default)
   .addSystems(Schedule.Startup, startupSystem)
   .addSystems(Schedule.Update, updateSystem)
-  .addSystems(Schedule.Destroy, cleanupSystem)
+  .addSystems(Schedule.PostUpdate, RenderPipeline.RenderSystem)
   .run();

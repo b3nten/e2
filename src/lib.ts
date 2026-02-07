@@ -1346,7 +1346,7 @@ export class SparseSet<T> {
   clear() {
     this.dense.length = 0;
     this.components.length = 0;
-    this.sparse = [];
+    this.sparse.length = 0;
   }
 
   *[Symbol.iterator](): Iterator<[entity: number, component: T]> {
@@ -2048,19 +2048,134 @@ export const EMPTY_SET = new EmptySet();
 /* Y8b  d8 88booo. `8b  d8' Y8b  d8 88 `88. */
 /*  `Y88P' Y88888P  `Y88P'   `Y88P' YP   YD */
 
-export class Clock {
+/**
+ * A high-resolution game clock that tracks frame timing, inspired by Bevy's `Time` resource.
+ *
+ * Call {@link capture} once per frame to advance the clock. The clock provides both
+ * **scaled** values ({@link delta}, {@link elapsed}) that respect {@link timeScale} and
+ * {@link pause}/{@link unpause}, and **raw** values ({@link rawDelta}, {@link rawElapsed})
+ * that always track real wall-clock time.
+ *
+ * Additional utilities include smoothed {@link fps}, a configurable {@link maxDelta} clamp
+ * to prevent spiral-of-death on long frames, and {@link elapsedWrapped} for shader-friendly
+ * time that avoids floating-point precision loss over long sessions.
+ *
+ * @example
+ * ```ts
+ * const timer = new Time();
+ *
+ * function loop() {
+ *   timer.capture();
+ *   object.position.x += velocity * timer.delta;
+ *   requestAnimationFrame(loop);
+ * }
+ * ```
+ */
+export class Time {
   #started = false;
   #now = 0;
   #last = 0;
   #delta = 0.016;
   #elapsed = 0;
 
+  #rawDelta = 0.016;
+  #rawElapsed = 0;
+
+  #paused = false;
+  #timeScale = 1;
+  #maxDelta = 0.06;
+  #wrapPeriod = 3600;
+
+  #frameCount = 0;
+  #fpsAccumulator = 0;
+  #fps = 0;
+  #fpsUpdateInterval = 0.25;
+
+  /** Scaled delta time in seconds since the last frame. */
   get delta() {
     return this.#delta;
   }
 
+  /** Scaled elapsed time in seconds since the timer started. */
   get elapsed() {
     return this.#elapsed;
+  }
+
+  /** Unscaled delta time in seconds since the last frame (ignores pause and timeScale). */
+  get rawDelta() {
+    return this.#rawDelta;
+  }
+
+  /** Unscaled elapsed time in seconds since the timer started (ignores pause and timeScale). */
+  get rawElapsed() {
+    return this.#rawElapsed;
+  }
+
+  /** Whether the timer is currently paused. When paused, `delta` is 0 and `elapsed` does not advance. */
+  get isPaused() {
+    return this.#paused;
+  }
+
+  /** Time scale multiplier applied to delta and elapsed. Default is 1. Set to 0.5 for half-speed, 2 for double-speed, etc. */
+  get timeScale() {
+    return this.#timeScale;
+  }
+
+  set timeScale(value: number) {
+    this.#timeScale = Math.max(0, value);
+  }
+
+  /** Maximum raw delta (in seconds) before clamping. Prevents spiral-of-death on long frames. Default is 0.06. */
+  get maxDelta() {
+    return this.#maxDelta;
+  }
+
+  set maxDelta(value: number) {
+    this.#maxDelta = Math.max(0.00001, value);
+  }
+
+  /** Wrap period for `elapsedWrapped`, in seconds. Default is 3600. */
+  get wrapPeriod() {
+    return this.#wrapPeriod;
+  }
+
+  set wrapPeriod(value: number) {
+    this.#wrapPeriod = Math.max(0.00001, value);
+  }
+
+  /** Elapsed time wrapped to the range [0, wrapPeriod). Useful for shaders to avoid floating-point precision loss. */
+  get elapsedWrapped() {
+    return this.#elapsed % this.#wrapPeriod;
+  }
+
+  /** Raw elapsed time wrapped to [0, wrapPeriod). */
+  get rawElapsedWrapped() {
+    return this.#rawElapsed % this.#wrapPeriod;
+  }
+
+  /** Smoothed frames per second, updated every ~0.25 seconds. */
+  get fps() {
+    return this.#fps;
+  }
+
+  /** The effective speed of the timer relative to real time, accounting for both timeScale and pause state. */
+  get effectiveSpeed() {
+    return this.#paused ? 0 : this.#timeScale;
+  }
+
+  /** Total number of frames captured. */
+  get frameCount() {
+    return this.#frameCount;
+  }
+
+  /** Pause the timer. `delta` becomes 0 and `elapsed` stops advancing. Raw values continue to track real time. */
+  pause() {
+    this.#paused = true;
+  }
+
+  /** Unpause the timer. */
+  unpause() {
+    this.#paused = false;
   }
 
   capture() {
@@ -2072,165 +2187,31 @@ export class Clock {
     }
 
     this.#now = performance.now();
+    this.#frameCount++;
 
-    this.#delta = Math.max(
+    const rawDt = Math.max(
       0.00001,
-      Math.min((this.#now - this.#last) / 1000, 0.06),
+      Math.min((this.#now - this.#last) / 1000, this.#maxDelta),
     );
 
-    this.#elapsed += this.#delta;
+    this.#rawDelta = rawDt;
+    this.#rawElapsed += rawDt;
+
+    if (this.#paused) {
+      this.#delta = 0;
+    } else {
+      this.#delta = rawDt * this.#timeScale;
+      this.#elapsed += this.#delta;
+    }
+
+    // FPS calculation (smoothed over a rolling interval)
+    this.#fpsAccumulator += rawDt;
+    if (this.#fpsAccumulator >= this.#fpsUpdateInterval) {
+      this.#fps = 1 / rawDt;
+      this.#fpsAccumulator = 0;
+    }
+
     this.#last = this.#now;
-  }
-}
-
-// F_asset
-/*  .d8b.  .d8888. .d8888. d88888b d888888b */
-/* d8' `8b 88'  YP 88'  YP 88'     `~~88~~' */
-/* 88ooo88 `8bo.   `8bo.   88ooooo    88    */
-/* 88~~~88   `Y8b.   `Y8b. 88~~~~~    88    */
-/* 88   88 db   8D db   8D 88.        88    */
-/* YP   YP `8888Y' `8888Y' Y88888P    YP    */
-
-export type HandleOf<T> = T extends AssetType<infer U> ? Handle<U> : never;
-
-export class Handle<T> {
-  constructor(asset: Res<AssetInstance<T>>) {
-    this.#asset = asset;
-  }
-
-  get pending() {
-    return this.#asset.tryDeref()?.pending ?? false;
-  }
-
-  get promise() {
-    return this.#asset.tryDeref()?.promise ?? Promise.reject(Err("Disposed"));
-  }
-
-  get error() {
-    const data = this.#asset.tryDeref()?.data;
-    if (data?.ok) return null;
-    else return data?.error;
-  }
-
-  get ready() {
-    const a = this.#asset.tryDeref();
-    return a?.data?.ok ?? false;
-  }
-
-  get ptr(): Readonly<AssetInstance<T>> | null {
-    return this.#asset.tryDeref();
-  }
-
-  get() {
-    const a = this.#asset.deref();
-    if (a.pending) {
-      throw Error("Asset is pending");
-    }
-    if (!a.data?.ok) {
-      throw Error("Asset has errored");
-    }
-    return a.data.value;
-  }
-
-  tryGet() {
-    const a = this.#asset.deref();
-    if (a.pending || !a.data?.ok) {
-      return null;
-    }
-    return a.data.value;
-  }
-
-  dispose() {
-    this.#asset.dispose();
-  }
-
-  #asset: Res<AssetInstance<T>>;
-}
-
-export interface AssetType<T extends any = unknown> {
-  path: string;
-  load(signal: AbortSignal): Promise<T>;
-  destroy?(instance: T): void;
-}
-
-type AssetInstance<T> = {
-  data: Result<T> | null;
-  promise: Promise<Result<T>>;
-  pending: boolean;
-  controller: AbortController;
-  type: AssetType;
-};
-
-export class Assets {
-  #resources = new Resources();
-
-  load<T>(asset: AssetType<T>): Handle<T> {
-    return new Handle(
-      this.#resources.add(
-        asset.path,
-        this.#load(asset, this.#resources.tryGet<AssetInstance<T>>(asset.path)),
-      ),
-    );
-  }
-
-  getOrLoad<T>(asset: AssetType<T>): Handle<T> {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
-    if (instance) return new Handle(instance);
-
-    return new Handle(this.#resources.add(asset.path, this.#load(asset, null)));
-  }
-
-  get<T>(asset: AssetType<T>): Handle<T> {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
-    if (!instance) throw Error(`Asset ${asset.path} does not exist`);
-    return new Handle(instance);
-  }
-
-  tryGet<T>(asset: AssetType<T>): Handle<T> | null {
-    const instance = this.#resources.tryGet<AssetInstance<T>>(asset.path);
-    if (!instance) return null;
-    return new Handle(instance);
-  }
-
-  clone<T>(handle: Handle<T>): Handle<T> {
-    return this.get(handle.ptr!.type) as Handle<T>;
-  }
-
-  #load<T>(
-    asset: AssetType<T>,
-    oldRes: Res<AssetInstance<T>> | null,
-  ): AssetInstance<T> {
-    const old = oldRes?.tryDeref();
-
-    if (old?.pending) {
-      old.controller.abort();
-    }
-
-    const assetInstance: Omit<AssetInstance<T>, "promise"> &
-      Partial<AssetInstance<T>> = {
-      data: old?.data ?? null,
-      pending: true,
-      controller: new AbortController(),
-      type: asset,
-    };
-
-    assetInstance.promise = runCatching(async () => {
-      const data = await asset.load(assetInstance.controller.signal);
-      if (assetInstance.controller.signal.aborted) {
-        throw Error("Aborted");
-      }
-      if (old?.data?.ok) {
-        try {
-          asset.destroy?.(old.data.value);
-        } catch {}
-      }
-      assetInstance.data = Ok(data);
-      return data;
-    }).finally(() => {
-      assetInstance.pending = false;
-    });
-
-    return <AssetInstance<T>>assetInstance;
   }
 }
 
@@ -2441,9 +2422,15 @@ export class Triggerer {
 
   trigger(...payloads: Object[]) {
     let current = this.#storage;
-    for (const _t of payloads) {
-      const t = ConstructorOf(_t);
-      const next = current.children.get(t);
+    for (const instance of payloads) {
+      let constructor = ConstructorOf(instance);
+      let next;
+      while (constructor) {
+        next = current.children.get(constructor);
+        if (next) break;
+        constructor = Object.getPrototypeOf(constructor);
+      }
+
       if (!next) return;
       current = next;
     }
@@ -2461,179 +2448,130 @@ export class Triggerer {
 /* 88 `88. 88.     db   8D */
 /* 88   YD Y88888P `8888Y' */
 
-type ResPtr<T = unknown> = {
+type RefPtr<T extends any = unknown> = {
   data: T | undefined;
+  readonly registry: RefRegistry;
   valid: boolean;
   refCount: number;
-  key: any;
 };
 
-export class Res<T = unknown> {
-  #ptr: ResPtr<T>;
-  #disposed = false;
-  #res: Resources;
+export class Ref<T extends any = unknown> {
+  #ptr?: RefPtr<T>;
+  #dropped = false;
 
-  private constructor(
-    res: Resources,
-    ptr: ResPtr<T>,
-    disposalFn: VoidFunction,
-  ) {
+  private constructor(ptr: RefPtr<T>) {
     this.#ptr = ptr;
-    this.#res = res;
-    this.dispose = () => {
-      if (this.#disposed) {
-        return;
-      }
-      this.#disposed = true;
-      disposalFn();
-    };
   }
 
+  /**
+   * Unwraps the underlying value, throwing if this reference was manually dropped or if
+   * the underlying value was disposed manually through the Registry.
+   * This value should not be stored, since it could become invalid later if all references
+   * are dropped or garbage collected, and the destructor is called.
+   */
   deref(): T {
-    if (this.#disposed) {
-      throw new Error("Resource handle has been disposed");
+    if (this.#dropped) {
+      throw new Error("Reference has been disposed");
     }
-    if (!this.#ptr.valid) {
-      throw new Error("Resource has been invalidated");
-    }
-    return this.#ptr.data!;
-  }
-
-  tryDeref(): T | null {
-    if (!this.#ptr.valid || this.#disposed) {
-      return null;
+    if (!this.#ptr?.valid) {
+      throw new Error("Reference has been invalidated");
     }
     return this.#ptr.data!;
   }
 
-  unwrap(): T | null {
-    return this.#ptr.data ?? null;
-  }
-
-  clone(): Res<T> {
-    return this.#res.clone(this);
-  }
-
-  /** @internal */
-  get ptr(): Readonly<ResPtr<T>> {
-    return this.#ptr;
-  }
-
-  readonly dispose: VoidFunction;
-}
-
-export class Resources {
-  #storage = new Map<any, ResPtr>();
-
-  #registry = new FinalizationRegistry<{ key: any; ptr: ResPtr }>((ctx) => {
-    this.#decrement(ctx.key, ctx.ptr);
-  });
-
-  create<T, Args extends any[]>(
-    key: ConstructorOf<T, Args>,
-    ...args: Args
-  ): Res<T> {
-    if (this.#storage.has(key)) {
-      const ptr = <ResPtr<T>>this.#storage.get(key);
-
-      try {
-        (ptr.data as any)?.destructor?.();
-      } catch (e) {}
-
-      ptr.data = isConstructor(key) ? new key(...args) : key;
-      ptr.valid = true;
-
-      return this.#createResource(key, ptr);
+  /**
+   * Creates a new reference to the underlying value, incrementing the reference count.
+   */
+  clone(): Ref<T> {
+    if (this.#dropped) {
+      throw new Error("Reference has been disposed");
     }
-
-    const ptr: ResPtr<T> = {
-      data: isConstructor(key) ? new key(...args) : key,
-      valid: true,
-      refCount: 1,
-      key,
-    };
-    this.#storage.set(key, ptr);
-
-    return this.#createResource(key, ptr);
-  }
-
-  add<T>(key: any, value: T): Res<T> {
-    if (this.#storage.has(key)) {
-      const ptr = <ResPtr<T>>this.#storage.get(key);
-
-      try {
-        (ptr.data as any)?.destructor?.();
-      } catch (e) {}
-
-      ptr.data = value;
-      ptr.valid = true;
-
-      return this.#createResource(key, ptr);
+    if (!this.#ptr?.valid) {
+      throw new Error("Reference has been invalidated");
     }
-
-    const ptr: ResPtr<T> = {
-      data: value,
-      valid: true,
-      refCount: 1,
-      key,
-    };
-    this.#storage.set(key, ptr);
-
-    return this.#createResource(key, ptr);
-  }
-
-  get<T = unknown>(key: any): Res<T> {
-    const ptr = this.#storage.get(key);
-    if (!ptr) {
-      throw Error(`No Resource for key (${key}) available`);
-    }
-    ptr.refCount++;
-    return this.#createResource(key, <ResPtr<T>>ptr);
-  }
-
-  tryGet<T = unknown>(key: any): Res<T> | null {
-    const ptr = this.#storage.get(key);
-    if (!ptr) {
-      return null;
-    }
-    ptr.refCount++;
-    return this.#createResource(key, <ResPtr<T>>ptr);
-  }
-
-  clone<T>(res: Res<T>): Res<T> {
-    return this.get<T>(res.ptr.key);
-  }
-
-  unwrap<T = unknown>(key: any) {
-    return this.#storage.get(key);
-  }
-
-  #createResource<T>(key: any, ptr: ResPtr<T>): Res<T> {
-    const token = {};
-
-    // @ts-expect-error private constructor is module scoped
-    const resource = new Res<T>(this, ptr, () => {
-      this.#registry.unregister(token);
-      this.#decrement(key, ptr);
-    });
-
-    this.#registry.register(resource, { key, ptr }, token);
-
+    this.#ptr.refCount++;
+    const resource = new Ref<T>(this.#ptr);
+    this.#ptr.registry.registry.register(resource, this.#ptr, resource);
     return resource;
   }
 
-  #decrement(key: any, ptr: ResPtr) {
+  /**
+   * Invalidates this reference, decrementing the reference count and potentially destroying the underlying value.
+   * This should be called when you know you are done with the value, since the use of FinalizationRegistry is indeterministic.
+   */
+  drop() {
+    if (this.#dropped || !this.#ptr?.valid) {
+      return;
+    }
+    this.#dropped = true;
+    this.#ptr.registry.decrement(this.#ptr);
+    this.#ptr.registry.drop(this);
+    this.#ptr = undefined;
+  }
+}
+
+type NotConstructor<T> = T extends Function
+  ? "Error: Constructor type requires arguments"
+  : T;
+
+export class RefRegistry {
+  storage = new Set<RefPtr>();
+
+  registry = new FinalizationRegistry<RefPtr>((ptr) => {
+    this.decrement(ptr);
+  });
+
+  /**
+   * Creates a new reference to the given value, which can be either a constructor or an existing value.
+   * If a constructor is provided, the registry will instantiate it with the given arguments.
+   * The registry will track the number of references to each value,
+   * and will call the destructor method on the value when all references are dropped or garbage collected.
+   * @param type - The value or constructor to create a reference for
+   * @param args - The arguments to pass to the constructor if a constructor is provided
+   * @returns A new reference to the value
+   */
+  create<T, Args extends any[]>(
+    type: ConstructorOf<T, Args>,
+    ...args: Args
+  ): Ref<T>;
+  create<T>(type: NotConstructor<T>): Ref<T>;
+  create<T>(type: ConstructorOf<T, any> | T, ...args: any[]): Ref<T> {
+    const ptr: RefPtr<T> = {
+      data: isConstructor(type) ? new type(...args) : type,
+      registry: this,
+      valid: true,
+      refCount: 1,
+    };
+    this.storage.add(ptr);
+    // @ts-expect-error module-scoped constructor
+    const resource = new Ref<T>(ptr);
+    this.registry.register(resource, ptr, resource);
+    return resource;
+  }
+
+  /** @internal */
+  decrement(ptr: RefPtr) {
     ptr.refCount--;
 
     if (ptr.refCount === 0) {
       this.#destroy(ptr);
-      if (this.#storage.get(key) === ptr) {
-        this.#storage.delete(key);
-      }
     }
   }
 
-  #destroy(ptr: ResPtr) {
+  /** @internal */
+  drop(ref: Ref) {
+    this.registry.unregister(ref);
+  }
+
+  destroy() {
+    for (const ptr of this.storage) {
+      this.#destroy(ptr);
+    }
+    this.storage.clear();
+  }
+
+  /** @internal */
+  #destroy(ptr: RefPtr) {
     if (!ptr.valid) return;
 
     try {
@@ -2642,5 +2580,342 @@ export class Resources {
 
     ptr.valid = false;
     ptr.data = undefined;
+    this.storage.delete(ptr);
+  }
+}
+
+export class ResourceManager {
+  #storage = new Map<ConstructorOf<Object>, Ref<Object>>();
+  #registry = new RefRegistry();
+
+  add<T extends Object>(key: ConstructorOf<T>): Ref<T> {
+    if (this.#storage.has(key)) {
+      const existing = this.#storage.get(key)!;
+      existing.drop();
+
+      let constructor = key;
+      while (constructor && constructor !== Function.prototype) {
+        this.#storage.delete(constructor);
+        constructor = Object.getPrototypeOf(constructor);
+      }
+    }
+
+    const ref = this.#registry.create(key);
+
+    let constructor = key;
+    while (constructor && constructor !== Function.prototype) {
+      this.#storage.set(constructor, ref);
+      constructor = Object.getPrototypeOf(constructor);
+    }
+
+    return ref;
+  }
+
+  get<T extends Object>(type: ConstructorOf<T>): T | undefined {
+    const ref = this.#storage.get(type);
+    return ref ? <T>ref.deref() : undefined;
+  }
+
+  destructor() {
+    for (const ref of this.#storage.values()) {
+      ref.drop();
+    }
+    this.#storage.clear();
+  }
+}
+
+const globalRegistry = new RefRegistry();
+export const make = globalRegistry.create.bind(globalRegistry);
+
+// F_asset
+/*  .d8b.  .d8888. .d8888. d88888b d888888b */
+/* d8' `8b 88'  YP 88'  YP 88'     `~~88~~' */
+/* 88ooo88 `8bo.   `8bo.   88ooooo    88    */
+/* 88~~~88   `Y8b.   `Y8b. 88~~~~~    88    */
+/* 88   88 db   8D db   8D 88.        88    */
+/* YP   YP `8888Y' `8888Y' Y88888P    YP    */
+
+export type HandleOf<T> = T extends AssetLoader<infer U> ? Handle<U> : never;
+
+export class Handle<T> {
+  constructor(asset: Ref<AssetInstance<T>>) {
+    this.#asset = asset;
+  }
+
+  get pending() {
+    return this.#asset.deref().pending ?? false;
+  }
+
+  get promise() {
+    return this.#asset.deref().promise ?? Promise.reject(Err("Disposed"));
+  }
+
+  get error() {
+    const data = this.#asset.deref()?.data;
+    if (data?.ok) return null;
+    else return data?.error;
+  }
+
+  get ready() {
+    const a = this.#asset.deref();
+    return a?.data?.ok ?? false;
+  }
+
+  get() {
+    const a = this.#asset.deref();
+    if (a.pending) {
+      throw Error("Asset is pending");
+    }
+    if (!a.data?.ok) {
+      throw Error("Asset has errored");
+    }
+    return a.data.value;
+  }
+
+  tryGet() {
+    const a = this.#asset.deref();
+    if (a.pending || !a.data?.ok) {
+      return null;
+    }
+    return a.data.value;
+  }
+
+  dispose() {
+    this.#asset.drop();
+  }
+
+  #asset: Ref<AssetInstance<T>>;
+}
+
+export interface AssetLoader<T extends any = unknown> {
+  path: string;
+  load(signal: AbortSignal): Promise<T>;
+  destroy?(instance: T): void;
+}
+
+type AssetInstance<T> = {
+  data: Result<T> | null;
+  promise: Promise<Result<T>>;
+  pending: boolean;
+  controller: AbortController;
+  type: AssetLoader;
+};
+
+export class Assets {
+  #registry = new RefRegistry();
+  #assets = new Map<string, Ref<AssetInstance<any>>>();
+
+  load<T>(asset: AssetLoader<T>): Handle<T> {
+    if (this.#assets.has(asset.path)) {
+      return new Handle<T>(
+        this.#assets.get(asset.path)?.clone() as Ref<AssetInstance<T>>,
+      );
+    }
+    const assetInstance = this.#load(asset);
+    const ref = this.#registry.create<AssetInstance<T>>(assetInstance);
+    this.#assets.set(asset.path, ref);
+    return new Handle<T>(ref);
+  }
+
+  #load<T>(asset: AssetLoader<T>): AssetInstance<T> {
+    const old = this.#assets.get(asset.path)?.deref();
+
+    if (old?.pending) {
+      old.controller.abort();
+    }
+
+    const assetInstance: Omit<AssetInstance<T>, "promise"> &
+      Partial<AssetInstance<T>> = {
+      data: old?.data ?? null,
+      pending: true,
+      controller: new AbortController(),
+      type: asset,
+    };
+
+    assetInstance.promise = runCatching(async () => {
+      const data = await asset.load(assetInstance.controller.signal);
+      if (assetInstance.controller.signal.aborted) {
+        throw Error("Aborted");
+      }
+      if (old?.data?.ok) {
+        try {
+          asset.destroy?.(old.data.value);
+        } catch {}
+      }
+      assetInstance.data = Ok(data);
+      return data;
+    }).finally(() => {
+      assetInstance.pending = false;
+    });
+
+    return <AssetInstance<T>>assetInstance;
+  }
+}
+
+/* d888888b d8b   db d8888b. db    db d888888b */
+/*   `88'   888o  88 88  `8D 88    88 `~~88~~' */
+/*    88    88V8o 88 88oodD' 88    88    88    */
+/*    88    88 V8o88 88~~~   88    88    88    */
+/*   .88.   88  V888 88      88b  d88    88    */
+/* Y888888P VP   V8P 88      ~Y8888P'    YP    */
+
+/**
+ * Class for key codes, corresponding to the KeyboardEvent.code property.
+ */
+export class KeyCode {
+  constructor(readonly value: string) {}
+}
+
+export const KeyCodes = {
+  None: new KeyCode("KEY_NONE"),
+
+  A: new KeyCode("KeyA"),
+  B: new KeyCode("KeyB"),
+  C: new KeyCode("KeyC"),
+  D: new KeyCode("KeyD"),
+  E: new KeyCode("KeyE"),
+  F: new KeyCode("KeyF"),
+  G: new KeyCode("KeyG"),
+  H: new KeyCode("KeyH"),
+  I: new KeyCode("KeyI"),
+  J: new KeyCode("KeyJ"),
+  K: new KeyCode("KeyK"),
+  L: new KeyCode("KeyL"),
+  M: new KeyCode("KeyM"),
+  N: new KeyCode("KeyN"),
+  O: new KeyCode("KeyO"),
+  P: new KeyCode("KeyP"),
+  Q: new KeyCode("KeyQ"),
+  R: new KeyCode("KeyR"),
+  S: new KeyCode("KeyS"),
+  T: new KeyCode("KeyT"),
+  U: new KeyCode("KeyU"),
+  V: new KeyCode("KeyV"),
+  W: new KeyCode("KeyW"),
+  X: new KeyCode("KeyX"),
+  Y: new KeyCode("KeyY"),
+  Z: new KeyCode("KeyZ"),
+
+  One: new KeyCode("Digit1"),
+  Two: new KeyCode("Digit2"),
+  Three: new KeyCode("Digit3"),
+  Four: new KeyCode("Digit4"),
+  Five: new KeyCode("Digit5"),
+  Six: new KeyCode("Digit6"),
+  Seven: new KeyCode("Digit7"),
+  Eight: new KeyCode("Digit8"),
+  Nine: new KeyCode("Digit9"),
+  Zero: new KeyCode("Digit0"),
+
+  Minus: new KeyCode("Minus"),
+  Equal: new KeyCode("Equal"),
+  BracketLeft: new KeyCode("BracketLeft"),
+  BracketRight: new KeyCode("BracketRight"),
+  Backslash: new KeyCode("Backslash"),
+  Semicolon: new KeyCode("Semicolon"),
+  Quote: new KeyCode("Quote"),
+  Comma: new KeyCode("Comma"),
+  Period: new KeyCode("Period"),
+  Slash: new KeyCode("Slash"),
+  Backspace: new KeyCode("Backspace"),
+  Space: new KeyCode("Space"),
+  ControlLeft: new KeyCode("ControlLeft"),
+  MetaLeft: new KeyCode("MetaLeft"),
+  AltLeft: new KeyCode("AltLeft"),
+  ShiftLeft: new KeyCode("ShiftLeft"),
+  CapsLock: new KeyCode("CapsLock"),
+  Tab: new KeyCode("Tab"),
+  Esc: new KeyCode("Escape"),
+  Enter: new KeyCode("Enter"),
+  ControlRight: new KeyCode("ControlRight"),
+  MetaRight: new KeyCode("MetaRight"),
+  AltRight: new KeyCode("AltRight"),
+  ShiftRight: new KeyCode("ShiftRight"),
+  ContextMenu: new KeyCode("ContextMenu"),
+  Insert: new KeyCode("Insert"),
+  Delete: new KeyCode("Delete"),
+  Home: new KeyCode("Home"),
+  End: new KeyCode("End"),
+  PageUp: new KeyCode("PageUp"),
+  PageDown: new KeyCode("PageDown"),
+  NumLock: new KeyCode("NumLock"),
+  Clear: new KeyCode("Clear"),
+
+  ArrowUp: new KeyCode("ArrowUp"),
+  ArrowDown: new KeyCode("ArrowDown"),
+  ArrowLeft: new KeyCode("ArrowLeft"),
+  ArrowRight: new KeyCode("ArrowRight"),
+  PrintScreen: new KeyCode("PrintScreen"),
+} as const;
+
+export const KeyCodeRegistry = new Map<string, KeyCode>(
+  Object.values(KeyCodes).map((code) => [code.value, code]),
+);
+
+/**
+ * Class for mouse button codes, corresponding to the MouseEvent.button property.
+ */
+export class MouseCode {
+  constructor(readonly value: number) {}
+}
+
+export const MouseCodes = {
+  Left: new MouseCode(0),
+  Middle: new MouseCode(1),
+  Right: new MouseCode(2),
+  Four: new MouseCode(3),
+  Five: new MouseCode(4),
+} as const;
+
+export const MouseCodeRegistry = new Map<number, MouseCode>(
+  Object.values(MouseCodes).map((code) => [code.value, code]),
+);
+
+/**
+ * Class for gamepad buttons, corresponding to the standard mapping order.
+ */
+export class GamepadButton {
+  constructor(
+    readonly gamepadIndex: number,
+    readonly buttonIndex: number,
+  ) {}
+}
+
+export const GamepadButtons = {
+  A: 0,
+  B: 1,
+  X: 2,
+  Y: 3,
+  LeftBumper: 4,
+  RightBumper: 5,
+  LeftTrigger: 6,
+  RightTrigger: 7,
+  Back: 8,
+  Start: 9,
+  LeftStick: 10,
+  RightStick: 11,
+  DPadUp: 12,
+  DPadDown: 13,
+  DPadLeft: 14,
+  DPadRight: 15,
+  Home: 16,
+} as const;
+
+const gamepadButtonRegistry = new Map<string, GamepadButton>();
+
+export class Gamepad {
+  static Button(
+    gamepadIndex: number,
+    button: keyof typeof GamepadButtons | number,
+  ) {
+    const buttonIndex =
+      typeof button === "number" ? button : GamepadButtons[button];
+    const key = `${gamepadIndex}:${buttonIndex}`;
+    let cached = gamepadButtonRegistry.get(key);
+    if (!cached) {
+      cached = new GamepadButton(gamepadIndex, buttonIndex);
+      gamepadButtonRegistry.set(key, cached);
+    }
+    return cached;
   }
 }
