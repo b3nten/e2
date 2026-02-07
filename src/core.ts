@@ -1,5 +1,20 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+/* Copyright (C) 2026 Benton Boychuk-Chorney
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>. */
+
 /*_,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_
 
            ,
@@ -31,22 +46,231 @@
      `---'    `----'   ;      /    \,.,,,/
                         `----`              fsc
 
-Copyright (C) 2026 Benton Boychuk-Chorney
+Elysiatech is a application framework & game engine with a Three.js integration that
+uses an entity component system (ECS) to manage state and behavior. In also
+provides a robust library for handling asset loading, input management, event handling,
+useful data structures, types, utility functions and more (found in lib.ts).
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published
-by the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+Elysiatech is designed to be modular and extensible -- the entire library is a small
+collection of modules with very few dependencies, and can be easily integrated into projects
+with minimal setup. It does not use NPM, rather users are encouraged to include the source
+files directly which enables customization and ease of integration. The documention lives
+directly in the source files.
 
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
+# App
 
-You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+The App is the entrypoint to an Elysiatech application. It orchestrates the full
+lifecycle: registering plugins, systems, resources, and events during configuration,
+then running startup schedules and entering the main update loop.
 
-This module forms the core of Elysiatech. Documentation coming soon.
+    const app = App.WithDefaults()
+      .addPlugins(myPlugin)
+      .addSystems(Schedule.Update, movementSystem)
+      .addEvents(CollisionEvent)
+      .run();
+
+An App follows a strict lifecycle: Configure → Run → Destroy.
+Once destroyed, it cannot be restarted.
+
+# Resources
+
+Resources are singleton objects that hold global state. They are registered with
+`addResources()` and automatically instantiated. Systems declare resource dependencies
+by including the resource's constructor in their args, and receive the singleton
+instance at runtime.
+
+Built-in resources (provided by App.defaultsPlugin): Time, Triggerer, World, Input.
+
+    class GameSettings { difficulty = 1; volume = 0.8; }
+
+    const app = App.WithDefaults()
+      .addResources(GameSettings)
+      .addSystems(Schedule.Update, System("ReadSettings", [GameSettings], (settings) => {
+        // settings is the singleton GameSettings instance
+      }));
+
+# Systems
+
+Systems are the primary unit of behavior. Each system has a name, a list of
+dependencies (queries, resources, event readers/writers), and a callback that
+operates on those dependencies. Create them with the System() function.
+
+    const gravitySystem = System(
+      "Gravity",
+      [Query(Mut(Velocity)), Time],
+      (query, time) => {
+        for (const [entity, vel] of query) {
+          vel.deref().dy -= 9.8 * time.delta;
+        }
+      }
+    );
+
+Systems can enforce which schedules they are allowed to run on via
+`.enforceSchedules()`, and can be restricted to specific app modes
+(Debug, Dev, Prod) via `.modes()`.
+
+# Events
+
+Events enable decoupled communication between systems using double-buffered
+event queues. Define an event type with Event(), register it with addEvents(),
+then use EvReader() and EvWriter() in system args to consume or produce events.
+
+Events persist for two frames (the frame they are written and one additional
+frame), then expire automatically.
+
+    const DamageEvent = Event<{ target: number; amount: number }>("Damage");
+
+    const damageSystem = System(
+      "ApplyDamage",
+      [EvReader(DamageEvent), World],
+      (reader, world) => {
+        for (const event of reader) {
+          const hp = world.getMut(event.target, Health);
+          hp.value -= event.amount;
+        }
+      }
+    );
+
+    app.addEvents(DamageEvent);
+
+# Plugins
+
+Plugins are functions that receive an App instance and call configuration methods
+on it, providing a way to modularize and share setup logic. Create them with
+Plugin(name, fn).
+
+    const PhysicsPlugin = Plugin("Physics", (app) => {
+      app.addResources(PhysicsConfig)
+         .addSystems(Schedule.Update, gravitySystem, collisionSystem)
+         .addEvents(CollisionEvent);
+    });
+
+    App.WithDefaults().addPlugins(PhysicsPlugin).run();
+
+# Scheduling
+
+Schedules determine when systems execute. The Schedule enum defines the
+application lifecycle phases:
+
+  Startup (runs once):
+    PreStartup → Startup → PostStartup
+
+  Update (runs every frame, in order):
+    PreUpdate → Update → PostUpdate → WorldFlush → EventUpdate → UpdateFinished
+
+  Error / Teardown:
+    StartupError (runs if a startup schedule throws)
+    Destroy (runs once when app.destroy() is called)
+
+Most game logic belongs on Schedule.Update. Input polling runs on PreUpdate.
+Deferred entity despawns and component removals are applied after WorldFlush.
+
+# Triggerer
+
+The Triggerer is a resource that broadcasts entity and component lifecycle events,
+such as ComponentInserted, ComponentRemovalScheduled, EntitySpawned, and
+EntityDespawnScheduled. Systems can register responders via the Triggerer to react
+to these events — for example, the built-in relationship system uses it to
+cascade despawns from parent to child entities.
+
+See the Triggerer and Trigger classes in lib.ts for full documentation.
+
+# Entity Component System (ECS)
+
+The World class is the central data structure of the ECS. It manages entities
+(lightweight numeric IDs) and their associated components (plain class instances).
+
+  - Spawn entities:        world.spawn(new Position(0, 0), new Velocity(1, 1))
+  - Insert components:     world.insert(entity, new Health(100))
+  - Read components:       world.get(entity, Position)      // Immutable<Position>
+  - Mutate components:     world.getMut(entity, Position)    // marks as changed
+  - Despawn/remove:        world.despawn(entity)             // deferred until flush
+
+Despawns and component removals are deferred — they are queued and only applied
+when world.flush() is called (during the WorldFlush schedule). This ensures
+systems can safely iterate without invalidating state mid-frame.
+
+The World also tracks component mutations across frames. Components accessed via
+getMut() or Mut() in queries are marked as changed, and can be filtered with
+Mutated() queries. See the World class documentation for full details.
+
+# Queries
+
+Queries let systems iterate over entities that have a specific set of components.
+Define them with Query() and include them in a system's args to receive a
+QueryIterator.
+
+    // Basic immutable query
+    const renderSystem = System("Render", [Query(Position, Sprite)], (query) => {
+      for (const [entity, pos, sprite] of query) {
+        draw(sprite, pos.x, pos.y);
+      }
+    });
+
+    // Mutable query — use Mut() and call .deref() to write
+    const moveSystem = System("Move", [Query(Mut(Position), Velocity)], (query) => {
+      for (const [entity, mutPos, vel] of query) {
+        const pos = mutPos.deref(); // marks Position as changed
+        pos.x += vel.dx;
+      }
+    });
+
+    // Change-filtered query — only yields entities whose component changed this frame
+    const changedSystem = System("OnChange", [Query(Mutated(Position))], (query) => {
+      for (const [entity, pos] of query) { // ... }
+    });
+
+QueryIterator also provides forEach(), first(), entities(), and components()
+helpers. See the QueryIterator class for full documentation.
+
+# Input & Relationships
+
+The Input resource provides unified keyboard, mouse, and gamepad state tracking,
+and the Relationship component enables parent-child entity hierarchies. Both are
+registered automatically by App.defaultsPlugin. See the Input and Relationship
+class documentation for details.
+
+# Example
+
+    // --- Define components ---
+    class Position { constructor(public x = 0, public y = 0) {} }
+    class Velocity { constructor(public dx = 0, public dy = 0) {} }
+
+    // --- Define events ---
+    const HitWallEvent = Event<{ entity: number }>("HitWall");
+
+    // --- Define systems ---
+    const spawnEntities = System("SpawnEntities", [World], (world) => {
+      world.spawn(new Position(0, 0), new Velocity(2, 1));
+      world.spawn(new Position(5, 5), new Velocity(-1, 3));
+    });
+
+    const movementSystem = System(
+      "Movement",
+      [Query(Mut(Position), Velocity), Time],
+      (query, time) => {
+        for (const [entity, mutPos, vel] of query) {
+          const pos = mutPos.deref();
+          pos.x += vel.dx * time.delta;
+          pos.y += vel.dy * time.delta;
+        }
+      }
+    );
+
+    // --- Define a plugin ---
+    const GamePlugin = Plugin("Game", (app) => {
+      app
+        .addSystems(Schedule.Startup, spawnEntities)
+        .addSystems(Schedule.Update, movementSystem)
+        .addEvents(HitWallEvent);
+    });
+
+    // --- Run the app ---
+    App.WithDefaults(CustomConfig)
+      .addSystems(Schedule.Startup, spawnEntities)
+      .addSystems(Schedule.Update, movementSystem)
+      .addEvents(HitBoundary)
+      .run();
 
 _,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_*/
 
