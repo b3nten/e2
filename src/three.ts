@@ -85,13 +85,6 @@ import {
 /*  `Y88P' YP   YP YP  YP  YP Y88888P 88   YD YP   YP */
 
 /**
- * Marker component that designates a camera entity as the active camera.
- * Attach this to an entity with a camera component to indicate it should
- * be used for rendering.
- */
-export class ActiveCameraComponent {}
-
-/**
  * Component that synchronizes a camera's projection properties with a canvas element.
  * When attached to an entity alongside a camera component, the system will automatically
  * update the camera's aspect ratio or frustum to match the canvas dimensions.

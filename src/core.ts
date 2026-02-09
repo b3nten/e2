@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-/* Copyright (C) 2026 Benton Boychuk-Chorney
+/*
+
+Copyright (C) 2026 Benton Boychuk-Chorney
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published
@@ -13,7 +15,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU Affero General Public License for more details.
 
 You should have received a copy of the GNU Affero General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>. */
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+*/
 
 /*_,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,__,.-'~'-.,_
 
@@ -384,6 +388,7 @@ import {
   MouseCode,
   MouseCodeRegistry,
   GamepadButton,
+  type FilterNever,
 } from "./lib.ts";
 
 // F_schedule
@@ -492,6 +497,9 @@ export const currentEntity = Symbol.for("CurrentEntity");
 /* `8P  d8' 88b  d88 88.     88 `88.    88    */
 /*  `Y88'Y8 ~Y8888P' Y88888P 88   YD    YP    */
 
+export type ComponentType = ConstructorOf<Object> | symbol;
+export type Component = Object | symbol;
+
 const mutTag = Symbol.for("MutTag");
 
 type MutParam<T> = {
@@ -555,6 +563,7 @@ type QueryList = readonly (
   | ConstructorOf<Object>
   | MutParam<any>
   | MutatedParam<any>
+  | symbol
 )[];
 
 const queryTag = Symbol.for("QueryTag");
@@ -568,9 +577,11 @@ type InferQuery<T extends QueryList> = {
     ? MutRef<InstanceOf<U>>
     : T[K] extends MutatedParam<infer U>
       ? InstanceOf<U>
-      : T[K] extends ConstructorOf<Object>
-        ? Immutable<InstanceOf<T[K]>>
-        : never;
+      : T[K] extends symbol
+        ? T[K]
+        : T[K] extends ConstructorOf<Object>
+          ? Immutable<InstanceOf<T[K]>>
+          : never;
 };
 
 // F_system
@@ -765,6 +776,21 @@ const entitySpawned = new EntitySpawned();
 export class EntityDespawnScheduled {}
 const entityDespawnScheduled = new EntityDespawnScheduled();
 
+const componentName = (component: Component | ComponentType): string => {
+  if (typeof component === "symbol") {
+    return component.description ?? component.toString();
+  } else if (typeof component === "function") {
+    return component.name;
+  } else {
+    return ConstructorOf<Component>(component).name;
+  }
+};
+
+const getComponentType = (component: Component): ComponentType =>
+  typeof component === "symbol"
+    ? component
+    : ConstructorOf<Component>(component);
+
 /**
  * The central data structure of the Entity Component System (ECS).
  *
@@ -829,17 +855,16 @@ const entityDespawnScheduled = new EntityDespawnScheduled();
 export class World {
   #entityCount = 0;
   #entities: Set<EntityID> = new Set();
-  #componentMap: AutoMap<ConstructorOf<Object>, SparseSet<Object>> =
-    new AutoMap(() => new SparseSet());
-  #despawnQueue = new Set<EntityID>();
-  #removalQueue = new AutoMap<ConstructorOf<Object>, Set<EntityID>>(
-    () => new Set(),
+  #componentMap: AutoMap<ComponentType, SparseSet<Object>> = new AutoMap(
+    () => new SparseSet(),
   );
+  #despawnQueue = new Set<EntityID>();
+  #removalQueue = new AutoMap<ComponentType, Set<EntityID>>(() => new Set());
   #sharedIterResult: any[] = [];
   #mutWrappers = Array.from({ length: 100 }).map(() => new MutRef(this));
   #generation = 0;
 
-  #mutatedComponentMap = new AutoMap<ConstructorOf<Object>, SparseSet<Object>>(
+  #mutatedComponentMap = new AutoMap<ComponentType, SparseSet<Object>>(
     () => new SparseSet(),
   );
 
@@ -861,7 +886,7 @@ export class World {
    * @returns The {@link EntityID} of the spawned entity.
    * @throws If any provided component instance already belongs to another entity.
    */
-  spawn(...components: Object[]): EntityID {
+  spawn(...components: Component[]): EntityID {
     const entity = ++this.#entityCount;
     this.#entities.add(entity);
     this.triggerer?.trigger(entitySpawned, entity);
@@ -920,29 +945,34 @@ export class World {
    * @throws If any component instance is already attached to another entity.
    * @throws If the entity already has a component of the same type.
    */
-  insert(entity: EntityID, ...components: Object[]) {
+  insert(entity: EntityID, ...components: Component[]) {
     if (!this.exists(entity)) {
       throw Error(`Entity ${entity} does not exist`);
     }
 
+    let type;
+
     for (const component of components) {
-      if ((<any>component)[currentEntity]) {
+      if (typeof component === "object" && (<any>component)[currentEntity]) {
         throw Error(`Component exists on another entity`);
       }
 
-      if (this.has(entity, ConstructorOf(component))) {
+      type = getComponentType(component);
+
+      if (this.has(entity, type)) {
         throw Error(
-          `Entity ${entity} already contains component ${ConstructorOf(component).name}`,
+          `Entity ${entity} already contains component ${componentName(component)}`,
         );
       }
 
-      (<any>component)[currentEntity] = entity;
-      this.#componentMap.get(ConstructorOf(component)).add(entity, component);
+      if (typeof component === "object") {
+        (<any>component)[currentEntity] = entity;
+      }
+
+      this.#componentMap.get(type).add(entity, component);
       // add to mutated components since components added are inherently mutable,
       // so they might be mutated after insertion
-      this.#mutatedComponentMap
-        .get(ConstructorOf(component))
-        .add(entity, component);
+      this.#mutatedComponentMap.get(type).add(entity, component);
       this.triggerer?.trigger(componentInserted, component);
     }
   }
@@ -954,7 +984,7 @@ export class World {
    * @param components - The component instances to attach.
    * @returns `true` if all components were successfully inserted, `false` if an error occurred.
    */
-  tryInsert(entity: EntityID, ...components: Object[]): boolean {
+  tryInsert(entity: EntityID, ...components: Component[]): boolean {
     try {
       this.insert(entity, ...components);
       return true;
@@ -973,7 +1003,7 @@ export class World {
    * @param components - The component type constructors to remove.
    * @throws If the entity does not exist.
    */
-  remove(entity: EntityID, ...components: ConstructorOf<Object>[]) {
+  remove(entity: EntityID, ...components: ComponentType[]) {
     if (!this.exists(entity)) {
       throw Error(`Entity ${entity} does not exist`);
     }
@@ -1010,7 +1040,7 @@ export class World {
    * @param components - The component type constructors to test for.
    * @returns `true` if the entity has every listed component type, `false` otherwise.
    */
-  has(entity: EntityID, ...components: ConstructorOf<Object>[]): boolean {
+  has(entity: EntityID, ...components: ComponentType[]): boolean {
     for (const component of components) {
       if (!this.#componentMap.get(component).has(entity)) {
         return false;
@@ -1127,14 +1157,13 @@ export class World {
    * @throws If the component does not exist on the `from` entity.
    * @throws If the `to` entity does not exist in the world.
    */
-  swap<T extends Object>(
-    componentType: ConstructorOf<T>,
-    from: EntityID,
-    to: EntityID,
-  ) {
+  swap(componentType: ComponentType, from: EntityID, to: EntityID) {
     if (!this.#componentMap.get(componentType).has(from)) {
-      throw Error(`Component ${componentType.name} does not exist on entity`);
+      throw Error(
+        `Component ${componentName(componentType)} does not exist on entity`,
+      );
     }
+
     if (!this.exists(to)) {
       throw Error(`to value of swap does not exist in world`);
     }
@@ -1142,7 +1171,9 @@ export class World {
     const component = this.#componentMap.get(componentType).get(from)!;
     this.triggerer?.trigger(componentRemovalScheduled, from, component);
 
-    (<any>component)[currentEntity] = to;
+    if (typeof component === "object") {
+      (<any>component)[currentEntity] = to;
+    }
     this.#componentMap.get(componentType).remove(from);
     this.#componentMap.get(componentType).add(to, component);
 
@@ -1158,24 +1189,25 @@ export class World {
    * @param to - The destination entity.
    * @returns `true` if the swap succeeded, `false` if the component or entity was missing.
    */
-  trySwap<T extends Object>(
-    componentType: ConstructorOf<T>,
-    from: EntityID,
-    to: EntityID,
-  ): boolean {
-    if (!this.#componentMap.get(componentType).has(from) || !this.exists(to)) {
+  trySwap(componentType: ComponentType, from: EntityID, to: EntityID): boolean {
+    if (!this.#componentMap.get(componentType).has(from)) {
+      return false;
+    }
+
+    if (!this.exists(to)) {
       return false;
     }
 
     const component = this.#componentMap.get(componentType).get(from)!;
     this.triggerer?.trigger(componentRemovalScheduled, from, component);
 
-    (<any>component)[currentEntity] = to;
-
+    if (typeof component === "object") {
+      (<any>component)[currentEntity] = to;
+    }
     this.#componentMap.get(componentType).remove(from);
     this.#componentMap.get(componentType).add(to, component);
-    this.triggerer?.trigger(componentInserted, component);
 
+    this.triggerer?.trigger(componentInserted, component);
     return true;
   }
 
@@ -1194,7 +1226,7 @@ export class World {
    * @param component - The component type constructor to check.
    * @returns `true` if the component is in the removal queue for this entity.
    */
-  willRemove(entity: EntityID, component: ConstructorOf<Object>): boolean {
+  willRemove(entity: EntityID, component: ComponentType): boolean {
     return this.#removalQueue.get(component).has(entity);
   }
 
@@ -1264,7 +1296,9 @@ export class World {
       if (this.exists(entity)) {
         for (const componentType of this.#componentMap.keys()) {
           const component = this.#componentMap.get(componentType).get(entity);
-          (<any>component)[currentEntity] = undefined;
+          if (typeof componentType === "object") {
+            (<any>component)[currentEntity] = undefined;
+          }
           this.#componentMap.get(componentType).remove(entity);
         }
       }
@@ -1276,7 +1310,9 @@ export class World {
       for (const entity of entities) {
         if (this.exists(entity)) {
           const component = this.#componentMap.get(componentType).get(entity);
-          (<any>component)[currentEntity] = undefined;
+          if (typeof componentType === "object") {
+            (<any>component)[currentEntity] = undefined;
+          }
           this.#componentMap.get(componentType).remove(entity);
         }
       }
@@ -1341,10 +1377,16 @@ export class World {
     query: T,
   ): IterableIterator<[EntityID, ...InferQuery<T>]> {
     const unwrapQueryItem = (item: any) =>
-      item[mutTag] ?? item[mutatedTag] ?? item;
+      typeof item === "symbol"
+        ? item
+        : (item?.[mutTag] ?? item?.[mutatedTag] ?? item);
 
     const getMap = (item: any) =>
-      mutatedTag in item ? this.#mutatedComponentMap : this.#componentMap;
+      typeof item === "symbol"
+        ? this.#componentMap
+        : mutatedTag in item
+          ? this.#mutatedComponentMap
+          : this.#componentMap;
 
     if (query.length === 0) return;
 
@@ -1375,7 +1417,7 @@ export class World {
         // move on if component is missing
         if (!this.#sharedIterResult[i + 1]) continue outer;
 
-        if (mutTag in query[i]) {
+        if (typeof query[i] === "object" && mutTag in <object>query[i]) {
           (<any>this.#mutWrappers[i]).value = this.#sharedIterResult[i + 1];
           this.#sharedIterResult[i + 1] = this.#mutWrappers[i];
         }

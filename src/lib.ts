@@ -661,6 +661,18 @@ export type UnionToIntersection<U> = (
  */
 export type Mutable<T> = { -readonly [P in keyof T]: T[P] };
 
+/**
+ * Filters out `never` entries from a tuple type.
+ */
+export type FilterNever<T extends readonly unknown[]> = T extends readonly [
+  infer H,
+  ...infer R,
+]
+  ? H extends never
+    ? FilterNever<R>
+    : readonly [H, ...FilterNever<R>]
+  : readonly [];
+
 export type Writable<T> = Mutable<T>;
 
 export type Immutable<T> = T extends (...args: any[]) => any
