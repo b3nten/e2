@@ -659,7 +659,17 @@ export type UnionToIntersection<U> = (
  *    // Expect: { name: string; age: number; visible: boolean; }
  *    Mutable<Props>;
  */
-export type Mutable<T> = { -readonly [P in keyof T]: T[P] };
+export type Mutable<T> = T extends ((...args: any[]) => any) | Primitive
+  ? T
+  : T extends ImmutableArray<infer U>
+    ? Array<Mutable<U>>
+    : T extends ImmutableObject<infer V>
+      ? { -readonly [P in keyof V]: Mutable<V[P]> }
+      : T extends readonly [infer H, ...infer R]
+        ? [Mutable<H>, ...Mutable<R>]
+        : T extends ReadonlyArray<infer U>
+          ? Array<Mutable<U>>
+          : T;
 
 /**
  * Filters out `never` entries from a tuple type.
@@ -1827,7 +1837,7 @@ class FancyConsoleWriter implements Writer {
   }
 
   error(message: any[]): void {
-    console.error(
+    console.log(
       `${this.formattedName.content} ${this.levels.error.content}`,
       ...this.formattedName.styles,
       ...this.levels.error.styles,
@@ -1836,7 +1846,7 @@ class FancyConsoleWriter implements Writer {
   }
 
   critical(message: any[]): void {
-    console.error(
+    console.log(
       `${this.formattedName.content} ${this.levels.critical.content}`,
       ...this.formattedName.styles,
       ...this.levels.critical.styles,
@@ -2492,6 +2502,19 @@ export class Ref<T extends any = unknown> {
   }
 
   /**
+   * Unwraps the underlying value, throwing if this reference was manually dropped or if
+   * the underlying value was disposed manually through the Registry.
+   * This value should not be stored, since it could become invalid later if all references
+   * are dropped or garbage collected, and the destructor is called.
+   */
+  tryDeref(): T | undefined {
+    if (this.#dropped || !this.#ptr?.valid) {
+      return;
+    }
+    return this.#ptr.data!;
+  }
+
+  /**
    * Creates a new reference to the underlying value, incrementing the reference count.
    */
   clone(): Ref<T> {
@@ -2587,13 +2610,21 @@ export class RefRegistry {
     if (!ptr.valid) return;
 
     try {
-      (ptr.data as any)?.destructor?.();
+      (ptr.data as Disposable)?.destroy?.();
+      (ptr.data as Disposable)?.destructor?.();
+      (ptr.data as Disposable)?.dispose?.();
     } catch (e) {}
 
     ptr.valid = false;
     ptr.data = undefined;
     this.storage.delete(ptr);
   }
+}
+
+export interface Disposable {
+  destroy?(): void;
+  destructor?(): void;
+  dispose?(): void;
 }
 
 export class ResourceManager {

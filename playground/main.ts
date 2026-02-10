@@ -26,15 +26,14 @@ import {
   Configuration,
   Mut,
   Query,
-  Relationship,
   Schedule,
   System,
   World,
 } from "../src/core.ts";
-import { Assets, Time, type Immutable, type Mutable } from "../src/lib.ts";
+import { Assets, make, Ref, Time } from "../src/lib.ts";
 import {
   SyncCameraComponent,
-  SceneData,
+  ThreeSceneData,
   ThreePlugin,
   Transform,
   FreeLookTarget,
@@ -46,45 +45,68 @@ class Config extends Configuration {
   mode = AppMode.Dev;
 }
 
-const player = Symbol.for("player");
-const activeCamera = Symbol.for("activeCamera");
+const Player = Symbol.for("player");
+const ActiveCamera = Symbol.for("active camera");
 
 class RenderPipeline {
-  canvas = document.getElementById("viewport") as HTMLCanvasElement;
+  canvas: Ref<HTMLCanvasElement> = make(
+    document.getElementById("viewport") as HTMLCanvasElement,
+  );
 
-  renderer = new Three.WebGLRenderer({
-    canvas: this.canvas,
-    antialias: true,
-  });
+  renderer: Ref<Three.WebGLRenderer> = make(
+    new Three.WebGLRenderer({
+      canvas: this.canvas.deref(),
+      antialias: true,
+    }),
+  );
 
-  render(scene: Three.Scene, camera: Three.Camera) {
-    this.renderer.render(scene, camera);
+  render(scene: Three.Scene, camera: Three.PerspectiveCamera) {
+    this.renderer.deref().render(scene, camera);
+  }
+
+  resize() {
+    this.renderer.tryDeref()?.setSize(window.innerWidth, window.innerHeight);
+  }
+
+  constructor() {
+    this.resize = this.resize.bind(this);
+    this.resize();
+    window.addEventListener("resize", this.resize);
+  }
+
+  destructor() {
+    window.removeEventListener("resize", this.resize);
+    this.renderer.drop();
+    this.canvas.drop();
   }
 }
 
 const startupSystem = System(
-  "Startup",
+  "Spawn",
   [World, RenderPipeline],
   (world, ThreeData) => {
+    // spawn environment entities
     world.spawn(new InfiniteGridMesh());
     world.spawn(new PhysicalSky());
     world.spawn(new Three.AmbientLight("white", 4));
 
+    // spawn camera
     world.spawn(
       Transform.WithPosition(0, 0, 5),
-      new Three.PerspectiveCamera(75, 16 / 9, 0.1, 1000),
-      new SyncCameraComponent(ThreeData.canvas),
-      new FreeLookTarget(),
-      activeCamera,
+      new Three.PerspectiveCamera(75, undefined, 0.1, 1000),
+      new SyncCameraComponent(ThreeData.canvas.deref()),
+      new FreeLookTarget({ lookSpeed: 0.35 }),
+      ActiveCamera,
     );
 
+    // spawn meshes
     const parent = world.spawn(
       new Three.Mesh(
         new Three.BoxGeometry(1, 1, 1),
         new Three.MeshBasicMaterial({ color: "red" }),
       ),
       Transform.WithPosition(0, 0, 0),
-      player,
+      Player,
     );
 
     const child = world.spawn(
@@ -92,49 +114,33 @@ const startupSystem = System(
         new Three.BoxGeometry(1, 1, 1),
         new Three.MeshBasicMaterial({ color: "green" }),
       ),
-      Transform.WithPosition(0, 1, 0),
+      Transform.WithPosition(0, 1.5, 0),
     );
 
-    Relationship.Parent(world, parent, child);
+    world.parent(parent, child);
   },
 );
 
 const updateSystem = System(
   "Update",
-  [Time, Query(Mut(Transform), Symbol.for("player"), Three.Mesh)],
-  (time, meshes) => {
-    for (const [entity, transform, player, mesh] of meshes) {
+  // query all entities with a transform & the player tag
+  [Time, Query(Mut(Transform), Player)],
+  (time, playerMeshes) => {
+    for (const [_, transform] of playerMeshes) {
       transform.deref().rotate(0, 1 * time.delta, 0);
     }
   },
 );
 
 const renderSystem = System(
-  "RenderSystem",
-  [World, RenderPipeline, SceneData, Query(activeCamera)],
-  (world, renderPipeline, { scene }, cameraQuery) => {
-    let camera: Immutable<Three.Camera> | null = null;
-
-    const first = cameraQuery.iter().next();
-    if (!first.done) {
-      const [entity] = first.value;
-      camera =
-        world.tryGet(entity, Three.PerspectiveCamera) ??
-        world.tryGet(entity, Three.OrthographicCamera);
-    }
-
-    if (!camera) {
-      console.warn("No active camera found for Three render system");
-      return;
-    }
-
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    renderPipeline.canvas.width = width;
-    renderPipeline.canvas.height = height;
-    renderPipeline.renderer.setSize(width, height, false);
-
-    renderPipeline.render(scene, <Mutable<Three.Camera>>camera);
+  "Render",
+  [World, RenderPipeline, ThreeSceneData, Query(ActiveCamera)],
+  (world, renderPipeline, { scene }, activeCameraQuery) => {
+    const camera = world.get(
+      activeCameraQuery.singleEntity(),
+      Three.PerspectiveCamera,
+    );
+    renderPipeline.render(scene, <Three.PerspectiveCamera>camera);
   },
 );
 

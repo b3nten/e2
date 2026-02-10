@@ -92,5 +92,6 @@ func main() {
 		w.Write(result.OutputFiles[0].Contents)
 	})
 
+	fmt.Println("Listening on http://localhost:8000")
 	http.ListenAndServe(":8000", mux)
 }

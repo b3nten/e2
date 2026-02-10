@@ -58,6 +58,7 @@ import {
   Input,
   Mut,
   Mutated,
+  onDeref,
   Plugin,
   Query,
   Relationship,
@@ -129,7 +130,7 @@ export class SyncCameraComponent {
  * Requires entities to have both a {@link SyncCameraComponent} and a camera component attached.
  */
 export const threeCanvasSyncSystem = System(
-  "Three::CanvasSyncSystem",
+  "ThreeCanvasSyncSystem",
   [
     Query(SyncCameraComponent, Mut(Three.PerspectiveCamera)),
     Query(SyncCameraComponent, Mut(Three.OrthographicCamera)),
@@ -287,15 +288,11 @@ export class Transform {
     let current: EntityID | Nullish = entity;
 
     while (current) {
-      const rel: Immutable<Relationship> | null = world.tryGet(
-        current,
-        Relationship,
-      );
       const t = world.tryGet(current, Transform);
       if (t) {
         this.chain.push(t.calculateMatrix());
       }
-      current = rel?.parent;
+      current = world.tryGet(current, Relationship)?.parent;
     }
 
     input.identity();
@@ -371,7 +368,7 @@ export class Transform {
    * {@link CalculateWorldMatrix}. Should generally be treated as read-only
    * outside of that system.
    */
-  public readonly worldMatrix = new Three.Matrix4();
+  public worldMatrix = new Three.Matrix4();
 
   /**
    * Recomputes and returns the local matrix by composing
@@ -643,10 +640,30 @@ export class Transform {
     this.rotation.copy(source.rotation);
     this.scale.copy(source.scale);
     this.matrix.copy(source.matrix);
-    this.worldMatrix.copy(<Mutable<Three.Matrix4>>source.worldMatrix);
+    this.worldMatrix.copy(<Three.Matrix4>source.worldMatrix);
     return this;
   }
+
+  /** @internal */
+  [onDeref](entity: EntityID, world: World) {
+    world.insert(entity, TransformDirty);
+    this.markChildrenDirty(entity, world);
+  }
+
+  private markChildrenDirty(entity: EntityID, world: World) {
+    const children = world.tryGet(entity, Relationship)?.children;
+    if (children) {
+      for (const child of children) {
+        if (world.has(child, Transform)) {
+          world.insert(child, TransformDirty);
+        }
+        this.markChildrenDirty(child, world);
+      }
+    }
+  }
 }
+
+const TransformDirty = Symbol.for("TransformDirty");
 
 /*  d888b  d8888b. d888888b d8888b. */
 /* 88' Y8b 88  `8D   `88'   88  `8D */
@@ -716,42 +733,42 @@ export class InfiniteGridMesh extends Three.Mesh {
       },
       transparent: true,
       vertexShader: `
-								varying vec3 worldPosition;
-						uniform float uDistance;
+				varying vec3 worldPosition;
+				uniform float uDistance;
 
-						void main() {
-										vec3 pos = position.${axes} * uDistance;
-										pos.${planeAxes} += cameraPosition.${planeAxes};
-										worldPosition = pos;
-										gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
-								}
-						`,
+				void main() {
+					vec3 pos = position.${axes} * uDistance;
+					pos.${planeAxes} += cameraPosition.${planeAxes};
+					worldPosition = pos;
+					gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+				}
+			`,
       fragmentShader: `
-								varying vec3 worldPosition;
-								uniform float uSize1;
-								uniform float uSize2;
-								uniform vec3 uColor;
-								uniform float uDistance;
+				varying vec3 worldPosition;
+				uniform float uSize1;
+				uniform float uSize2;
+				uniform vec3 uColor;
+				uniform float uDistance;
 
-								float getGrid(float size) {
-									vec2 r = worldPosition.${planeAxes} / size;
-										vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
-										float line = min(grid.x, grid.y);
-										return 1.0 - min(line, 1.0);
-								}
+				float getGrid(float size) {
+					vec2 r = worldPosition.${planeAxes} / size;
+					vec2 grid = abs(fract(r - 0.5) - 0.5) / fwidth(r);
+					float line = min(grid.x, grid.y);
+					return 1.0 - min(line, 1.0);
+				}
 
-								void main() {
-										float d = 1.0 - min(distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes}) / uDistance, 1.0);
+				void main() {
+					float d = 1.0 - min(distance(cameraPosition.${planeAxes}, worldPosition.${planeAxes}) / uDistance, 1.0);
 
-										float g1 = getGrid(uSize1);
-										float g2 = getGrid(uSize2);
+					float g1 = getGrid(uSize1);
+					float g2 = getGrid(uSize2);
 
-										gl_FragColor = vec4(uColor.rgb, mix(g2, g1, g1) * pow(d, 3.0));
-										gl_FragColor.a = mix(0.5 * gl_FragColor.a, gl_FragColor.a, g2);
+					gl_FragColor = vec4(uColor.rgb, mix(g2, g1, g1) * pow(d, 3.0));
+					gl_FragColor.a = mix(0.5 * gl_FragColor.a, gl_FragColor.a, g2);
 
-										if ( gl_FragColor.a <= 0.0 ) discard;
-								}
-						`,
+					if ( gl_FragColor.a <= 0.0 ) discard;
+				}
+			`,
     });
     super(geometry, material);
     this.frustumCulled = false;
@@ -889,18 +906,27 @@ export class PrimitiveTorus extends Three.Mesh {
  * ```
  */
 export class FreeLookTarget {
+  lookSpeed = 0.3;
+  moveSpeed = 15;
+  sprintMultiplier = 5;
+
   /**
    * Creates a new FreeLookTarget component.
    *
-   * @param lookSpeed - Sensitivity multiplier for mouse look rotation. Default is `0.3`.
-   * @param moveSpeed - Base movement speed in units per second. Default is `15`.
-   * @param sprintMultiplier - Multiplier applied to movement speed when sprinting (holding Shift). Default is `5`.
+   * @param args - Configuration object for the FreeLookTarget.
+   * @param args.lookSpeed - Sensitivity multiplier for mouse look rotation. Default is `0.3`.
+   * @param args.moveSpeed - Base movement speed in units per second. Default is `15`.
+   * @param args.sprintMultiplier - Multiplier applied to movement speed when sprinting (holding Shift). Default is `5`.
    */
   constructor(
-    public lookSpeed: number = 0.3,
-    public moveSpeed: number = 15,
-    public sprintMultiplier: number = 5,
-  ) {}
+    args: {
+      lookSpeed?: number;
+      moveSpeed?: number;
+      sprintMultiplier?: number;
+    } = {},
+  ) {
+    Object.assign(this, args);
+  }
 
   /** Current velocity vector applied to the transform each frame. */
   velocity = new Three.Vector3();
@@ -910,7 +936,7 @@ export class FreeLookTarget {
 }
 
 export const threeFreelookSystem = System(
-  "Three::FreeLookSystem",
+  "ThreeFreeLookSystem",
   [Input, Time, Query(Mut(FreeLookTarget), Mut(Transform))],
   (input, time, freeLookQuery) => {
     const delta = time.delta;
@@ -1107,13 +1133,13 @@ export class PhysicalSky extends Three.Object3D {
 class DebugSystemState {}
 
 export const debugSystemInit = System(
-  "Three::DebugSystemInit",
+  "ThreeDebugSystemInit",
   [World],
   () => {},
 ).enforceSchedules(Schedule.PreStartup, Schedule.Startup, Schedule.PostStartup);
 
 export const debugRenderSystem = System(
-  "Three::DebugSystemRender",
+  "ThreeDebugSystemRender",
   [World],
   () => {},
 );
@@ -1125,7 +1151,7 @@ export const debugRenderSystem = System(
 /* db   8D Y8b  d8 88.     88  V888 88.     */
 /* `8888Y'  `Y88P' Y88888P VP   V8P Y88888P */
 
-class Object3DPool {
+class ThreeObject3DPool {
   #storage = new Set<Three.Object3D>();
 
   add(object3d: Three.Object3D) {
@@ -1148,9 +1174,9 @@ class Object3DPool {
 /**
  * Container for Three.js scene data, including the root node and a list of all Three.js objects in the scene.
  */
-export class SceneData {
+export class ThreeSceneData {
   readonly scene = new Three.Scene();
-  readonly object3dPool = new Object3DPool();
+  readonly object3dPool = new ThreeObject3DPool();
 }
 
 /* d8888b. db      db    db  d888b  d888888b d8b   db */
@@ -1161,16 +1187,16 @@ export class SceneData {
 /* 88      Y88888P ~Y8888P'  Y888P  Y888888P VP   V8P */
 
 const cachedMatrixAutoUpdate = Symbol.for(
-  "Three::ObjectSyncSystem::cachedMatrixAutoUpdate",
+  "ThreeObjectSyncSystem CachedMatrixAutoUpdate",
 );
 
 const cachedMatrixWorldAutoUpdate = Symbol.for(
-  "Three::ObjectSyncSystem::cachedMatrixWorldAutoUpdate",
+  "ThreeObjectSyncSystem CachedMatrixWorldAutoUpdate",
 );
 
 export const threeObjectSyncSystem = System(
-  "Three::ObjectSyncSystem",
-  [World, Triggerer, SceneData],
+  "ThreeObjectSyncSystem",
+  [World, Triggerer, ThreeSceneData],
   (world, triggerer, threeData) => {
     // Insert component in scene
     triggerer.addResponder(
@@ -1213,12 +1239,17 @@ export const threeObjectSyncSystem = System(
 ).enforceSchedules(Schedule.PreStartup, Schedule.Startup, Schedule.PostStartup);
 
 export const threeTransformPropagationSystem = System(
-  "Three::TransformPropagationSystem",
-  [World, SceneData, Query(Mutated(Transform))],
+  "ThreeTransformPropagationSystem",
+  [World, ThreeSceneData, Query(Mut(Transform), TransformDirty)],
   (world, threeData, transforms) => {
     // update mutated transforms
     for (const [entity, transform] of transforms) {
-      Transform.CalculateWorldMatrix(world, entity, transform.worldMatrix);
+      Transform.CalculateWorldMatrix(
+        world,
+        entity,
+        transform.deref().worldMatrix,
+      );
+      world.remove(entity, TransformDirty);
     }
 
     for (const object3d of threeData.object3dPool) {
@@ -1264,7 +1295,7 @@ export const threeTransformPropagationSystem = System(
 export const ThreePlugin = {
   Default: Plugin("ThreeDefaults", (app: App) => {
     app
-      .addResources(SceneData, Object3DPool)
+      .addResources(ThreeSceneData, ThreeObject3DPool)
       .addSystems(Schedule.PreStartup, threeObjectSyncSystem)
       .addSystems(Schedule.PreUpdate, threeFreelookSystem)
       .addSystems(Schedule.Update, threeCanvasSyncSystem)
@@ -1272,7 +1303,7 @@ export const ThreePlugin = {
   }),
   Minimal: Plugin("ThreeMinimal", (app: App) => {
     app
-      .addResources(SceneData, Object3DPool)
+      .addResources(ThreeSceneData, ThreeObject3DPool)
       .addSystems(Schedule.PreStartup, threeObjectSyncSystem)
       .addSystems(Schedule.WorldFlush, threeTransformPropagationSystem);
   }),
@@ -1283,7 +1314,7 @@ export const ThreePlugin = {
     TransformPropagationSystem: threeTransformPropagationSystem,
   },
   Resources: {
-    SceneData,
-    Object3DPool,
+    ThreeSceneData: ThreeSceneData,
+    ThreeObject3DPool: ThreeObject3DPool,
   },
 };

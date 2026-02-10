@@ -388,7 +388,7 @@ import {
   MouseCode,
   MouseCodeRegistry,
   GamepadButton,
-  type FilterNever,
+  type Mutable,
 } from "./lib.ts";
 
 // F_schedule
@@ -502,7 +502,7 @@ export type Component = Object | symbol;
 
 const mutTag = Symbol.for("MutTag");
 
-type MutParam<T> = {
+type MutParam<T extends ConstructorOf<any>> = {
   [mutTag]: T;
 };
 
@@ -510,15 +510,19 @@ type MutParam<T> = {
  * Marks a component as mutable in a query.
  * This ensures proper change tracking and prevents aliasing issues.
  */
-export function Mut<T>(value: T): MutParam<T> {
+export function Mut<T extends ConstructorOf<Object>>(value: T): MutParam<T> {
   return { [mutTag]: value };
 }
+
+export const onDeref = Symbol.for("MutRef::OnDeref");
+
+export const castMut = <T>(value: Immutable<T>) => <Mutable<T>>value;
 
 /**
  * A reference to a mutable component.
  * Tracks mutations to ensure proper change detection.
  */
-class MutRef<T> {
+class MutRef<T extends Object> {
   constructor(world: World) {
     this.world = world;
   }
@@ -528,7 +532,7 @@ class MutRef<T> {
    * @returns The mutable component.
    */
   deref(): T {
-    this.world.markChanged(this.value!);
+    this.world.markChanged(this.value);
     return this.value;
   }
 
@@ -573,12 +577,12 @@ export function Query<T extends QueryList>(...values: T) {
 }
 
 type InferQuery<T extends QueryList> = {
-  [K in keyof T]: T[K] extends MutParam<infer U>
-    ? MutRef<InstanceOf<U>>
-    : T[K] extends MutatedParam<infer U>
-      ? InstanceOf<U>
-      : T[K] extends symbol
-        ? T[K]
+  [K in keyof T]: T[K] extends symbol
+    ? T[K]
+    : T[K] extends MutParam<infer U extends ConstructorOf<Object>>
+      ? MutRef<InstanceType<U>>
+      : T[K] extends MutatedParam<infer U>
+        ? InstanceOf<U>
         : T[K] extends ConstructorOf<Object>
           ? Immutable<InstanceOf<T[K]>>
           : never;
@@ -647,13 +651,51 @@ export class QueryIterator<T extends QueryList> {
   }
 
   /**
-   * Returns the first query result, or `undefined` if the query matches nothing.
-   * Useful for singleton components.
+   * Returns the first query result, or throws an error if the query matches nothing.
    */
-  first(): QueryResult<T> | undefined {
+  single(): QueryResult<T> {
     const it = this.iter();
     const n = it.next();
-    return n.done ? undefined : (n.value as any);
+    if (n.done) {
+      throw new Error("Query matched nothing");
+    }
+    return n.value;
+  }
+
+  /**
+   * Returns the first query result, or `undefined` if the query matches nothing.
+   */
+  trySingle(): QueryResult<T> | undefined {
+    const it = this.iter();
+    const n = it.next();
+    if (n.done) {
+      return undefined;
+    }
+    return n.value;
+  }
+
+  /**
+   * Returns the first query result's entity, or throws an error if the query matches nothing.
+   */
+  singleEntity(): EntityID {
+    const it = this.iter();
+    const n = it.next();
+    if (n.done) {
+      throw new Error("Query matched nothing");
+    }
+    return n.value[0];
+  }
+
+  /**
+   * Returns the first query result's entity, or `undefined` if the query matches nothing.
+   */
+  trySingleEntity(): EntityID | undefined {
+    const it = this.iter();
+    const n = it.next();
+    if (n.done) {
+      return undefined;
+    }
+    return n.value[0];
   }
 
   /**
@@ -959,7 +1001,7 @@ export class World {
 
       type = getComponentType(component);
 
-      if (this.has(entity, type)) {
+      if (typeof component === "object" && this.has(entity, type)) {
         throw Error(
           `Entity ${entity} already contains component ${componentName(component)}`,
         );
@@ -1265,10 +1307,12 @@ export class World {
    *
    * @param component - The component instance to mark as changed.
    */
-  markChanged(component: Object) {
+  markChanged(component: Component) {
     this.#mutatedComponentMap
       .get(ConstructorOf(component))
       .add(this.getEntity(component), component);
+
+    (<any>component)[onDeref]?.(this.getEntity(component), this);
   }
 
   /**
@@ -1279,6 +1323,79 @@ export class World {
   componentChanged(component: Object): boolean {
     const entity = this.getEntity(component);
     return this.#mutatedComponentMap.get(ConstructorOf(component)).has(entity);
+  }
+
+  /**
+   * Establishes a parent-child relationship between two entities.
+   *
+   * If either entity does not have a `Relationship` component, one is automatically
+   * created and inserted. If the child already has a parent, it is first unparented
+   * from the old parent before being reparented to the new one.
+   *
+   * This method performs circular relationship detection by walking up the parent chain
+   * from the proposed parent. If the child is found in that chain, a circular relationship
+   * would be created, and an error is thrown.
+   *
+   * @param parent - The entity ID of the parent entity.
+   * @param child - The entity ID of the child entity.
+   * @throws If either `parent` or `child` does not exist in the world.
+   * @throws If establishing the relationship would create a cycle (circular reference).
+   */
+  parent(parent: EntityID, child: EntityID) {
+    Relationship.Parent(this, parent, child);
+  }
+
+  /**
+   * Attempts to establish a parent-child relationship between two entities.
+   *
+   * Unlike {@link parent}, this does not throw on failure.
+   *
+   * @param parent - The entity ID of the parent entity.
+   * @param child - The entity ID of the child entity.
+   * @returns `true` if the relationship was successfully established, `false` if an error occurred.
+   */
+  tryParent(parent: EntityID, child: EntityID): boolean {
+    try {
+      Relationship.Parent(this, parent, child);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Removes a parent-child relationship between two entities.
+   *
+   * If the child's parent is the specified `parent`, the child's parent reference is
+   * cleared (`null`). The child is also removed from the parent's children set.
+   *
+   * If either entity does not exist, or if either entity lacks a `Relationship` component,
+   * the method returns early without throwing.
+   *
+   * @param parent - The entity ID of the parent entity.
+   * @param child - The entity ID of the child entity.
+   * @throws If either `parent` or `child` does not exist in the world.
+   */
+  unparent(parent: EntityID, child: EntityID) {
+    Relationship.Unparent(this, parent, child);
+  }
+
+  /**
+   * Attempts to remove a parent-child relationship between two entities.
+   *
+   * Unlike {@link unparent}, this does not throw on failure.
+   *
+   * @param parent - The entity ID of the parent entity.
+   * @param child - The entity ID of the child entity.
+   * @returns `true` if the relationship was successfully removed, `false` if an error occurred.
+   */
+  tryUnparent(parent: EntityID, child: EntityID): boolean {
+    try {
+      Relationship.Unparent(this, parent, child);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   /**
@@ -1509,6 +1626,17 @@ export enum AppMode {
  */
 export class Configuration {
   /**
+   * The execution mode of the app, affecting logging verbosity and conditional system execution.
+   *
+   * - **{@link AppMode.Debug}** — enables verbose logging (`LogLevel.Debug`).
+   * - **{@link AppMode.Dev}** — enables informational logging (`LogLevel.Info`).
+   * - **{@link AppMode.Prod}** (default) — disables logging (`LogLevel.Silent`).
+   *
+   * Systems can be configured to only run in specific modes using the `.modes(...)` method.
+   */
+  mode: AppMode = AppMode.Prod;
+
+  /**
    * The update timestep in milliseconds.
    *
    * - **`0`** (default) — uses `requestAnimationFrame`, running the update loop as fast as
@@ -1531,47 +1659,13 @@ export class Configuration {
   fixedTimeStep = 20;
 
   /**
-   * Whether system errors during update and fixed-update schedules should be thrown.
+   * The minimum log level for the default logger.
    *
-   * - **`false`** (default) — errors are caught, logged, and passed to {@link onSystemError}.
-   *   The app continues running.
-   * - **`true`** — errors are re-thrown after logging, halting the app.
+   * Ignored if a custom {@link logger} is provided.
    *
-   * Startup schedules (`PreStartup`, `Startup`, `PostStartup`) always throw on error,
-   * regardless of this setting.
+   * If undefined, uses the default log level for the {@link mode}.
    */
-  throwOnSystemError = false;
-
-  /**
-   * A callback invoked whenever a system throws an error.
-   *
-   * Use this for custom error reporting, analytics, or telemetry. The error is logged
-   * by the app's logger regardless of this callback.
-   *
-   * Defaults to {@link noop} (no-op).
-   *
-   * @param error - The error thrown by the system.
-   *
-   * @example
-   * ```ts
-   * config.onSystemError = (error) => {
-   *   console.error("System error:", error);
-   *   // send to error tracking service
-   * };
-   * ```
-   */
-  onSystemError: (error: unknown) => void = noop;
-
-  /**
-   * The execution mode of the app, affecting logging verbosity and conditional system execution.
-   *
-   * - **{@link AppMode.Debug}** — enables verbose logging (`LogLevel.Debug`).
-   * - **{@link AppMode.Dev}** — enables informational logging (`LogLevel.Info`).
-   * - **{@link AppMode.Prod}** (default) — disables logging (`LogLevel.Silent`).
-   *
-   * Systems can be configured to only run in specific modes using the `.modes(...)` method.
-   */
-  mode: AppMode = AppMode.Prod;
+  logLevel?: LogLevel;
 
   /**
    * An optional custom {@link Logger} instance for app-level logging.
@@ -1671,11 +1765,13 @@ export class App {
     if (!this.#config.logger) {
       this.#config.logger = new Logger(
         "app",
-        this.#config.mode === AppMode.Debug
-          ? LogLevel.Debug
-          : this.#config.mode === AppMode.Dev
-            ? LogLevel.Info
-            : LogLevel.Silent,
+        this.#config.logLevel
+          ? this.#config.logLevel
+          : this.#config.mode === AppMode.Debug
+            ? LogLevel.Debug
+            : this.#config.mode === AppMode.Dev
+              ? LogLevel.Info
+              : LogLevel.Silent,
         logColors.purple,
       );
     }
@@ -1840,44 +1936,44 @@ export class App {
       return this;
     }
 
-    if (this.#destroyed) {
-      throw Error("Attempted to run an app when it was previously destroyed");
-    }
-
-    assertInstanceOf(
-      this.#config,
-      Configuration,
-      `Configuration resource must exist and be instanceof Configuration`,
-    );
-
-    assertInstanceOf(
-      this.#resources.get(Time),
-      Time,
-      `Time resource must exist and be instanceof Time`,
-    );
-
-    const triggerer = this.#resources.get(Triggerer);
-    assertInstanceOf(
-      triggerer,
-      Triggerer,
-      `Triggerer resource must exist and be instanceof Triggerer`,
-    );
-
-    const world = this.#resources.get(World);
-    assertInstanceOf(
-      world,
-      World,
-      `World resource must exist and be instanceof World`,
-    );
-
-    world.triggerer = triggerer;
-
-    const logger = this.#logger;
-
-    this.#started = true;
-    logger.debug("Started app");
-
     try {
+      if (this.#destroyed) {
+        throw Error("Attempted to run an app when it was previously destroyed");
+      }
+
+      assertInstanceOf(
+        this.#config,
+        Configuration,
+        `Configuration resource must exist and be instanceof Configuration`,
+      );
+
+      assertInstanceOf(
+        this.#resources.get(Time),
+        Time,
+        `Time resource must exist and be instanceof Time`,
+      );
+
+      const triggerer = this.#resources.get(Triggerer);
+      assertInstanceOf(
+        triggerer,
+        Triggerer,
+        `Triggerer resource must exist and be instanceof Triggerer`,
+      );
+
+      const world = this.#resources.get(World);
+      assertInstanceOf(
+        world,
+        World,
+        `World resource must exist and be instanceof World`,
+      );
+
+      world.triggerer = triggerer;
+
+      const logger = this.#logger;
+
+      this.#started = true;
+      logger.debug("Started app");
+
       for (const [schedule, systems] of this.#providedSystems) {
         for (const system of systems) {
           this.#systems.get(schedule).add({
@@ -1888,28 +1984,21 @@ export class App {
         }
       }
 
-      this.#runSystems(Schedule.PreStartup, {
-        throwOnError: true,
-        errorPrefix: "pre startup system",
-      });
+      this.#runSystems(Schedule.PreStartup);
 
-      this.#runSystems(Schedule.Startup, {
-        throwOnError: true,
-        errorPrefix: "startup system",
-      });
+      this.#runSystems(Schedule.Startup);
 
-      this.#runSystems(Schedule.PostStartup, {
-        throwOnError: true,
-        errorPrefix: "post startup system",
-      });
+      this.#runSystems(Schedule.PostStartup);
+
+      logger.success("App successfully started!");
     } catch (error) {
-      this.#runSystems(Schedule.StartupError);
-      throw error;
+      this.#runSystems(Schedule.StartupError, {
+        suppress: true,
+      });
+      this.#fatal(error);
     }
 
     setTimeout(this.#update, 0);
-
-    logger.success("App successfully started!");
 
     return this;
   }
@@ -1930,7 +2019,9 @@ export class App {
       );
     }
 
-    this.#runSystems(Schedule.Destroy);
+    this.#runSystems(Schedule.Destroy, {
+      suppress: true,
+    });
 
     this.#systems = new AutoMap<
       Schedule,
@@ -1944,7 +2035,7 @@ export class App {
 
     this.#started = false;
     this.#destroyed = true;
-    this.#logger.debug(`Destroyed app ${this}`);
+    this.#logger.info(`Destroyed app`);
   }
 
   /**
@@ -2002,56 +2093,67 @@ export class App {
       return;
     }
 
-    const logger = this.#logger;
+    try {
+      const logger = this.#logger;
 
-    if (this.#config.timeStep === 0) {
-      requestAnimationFrame(this.#update);
-    } else {
-      setTimeout(this.#update, this.#config.timeStep);
-    }
+      if (this.#config.timeStep === 0) {
+        requestAnimationFrame(this.#update);
+      } else {
+        setTimeout(this.#update, this.#config.timeStep);
+      }
 
-    // capture time
-    const time = this.#resources.get(Time)!;
-    time.capture();
+      // capture time
+      const time = this.#resources.get(Time)!;
+      time.capture();
 
-    logger.debug(`running preupdate schedule`);
-    this.#runSystems(Schedule.PreUpdate);
-    logger.debug(`running update schedule`);
-    this.#runSystems(Schedule.Update);
-    logger.debug(`running postupdate schedule`);
-    this.#runSystems(Schedule.PostUpdate);
+      logger.debug(`running preupdate schedule`);
+      this.#runSystems(Schedule.PreUpdate, {
+        suppress: true,
+      });
 
-    // flush world (remove queued components and entities)
-    const world = <World>this.#resources.get(World)!;
-    logger.debug("flushing world");
-    this.#runSystems(Schedule.WorldFlush);
-    world.flush();
-    world.tick();
+      logger.debug(`running update schedule`);
+      this.#runSystems(Schedule.Update, {
+        suppress: true,
+      });
 
-    // update event queues
-    logger.debug("updating event queues");
-    this.#runSystems(Schedule.EventUpdate);
-    for (const queue of this.#events.values()) {
-      queue.update();
+      logger.debug(`running postupdate schedule`);
+      this.#runSystems(Schedule.PostUpdate, {
+        suppress: true,
+      });
+
+      // flush world (remove queued components and entities)
+      const world = <World>this.#resources.get(World)!;
+      logger.debug("flushing world");
+      this.#runSystems(Schedule.WorldFlush, {
+        suppress: true,
+      });
+      world.flush();
+      world.tick();
+
+      // update event queues
+      logger.debug("updating event queues");
+      this.#runSystems(Schedule.EventUpdate, {
+        suppress: true,
+      });
+      for (const queue of this.#events.values()) {
+        queue.update();
+      }
+    } catch (error) {
+      this.#fatal(error);
     }
   };
 
-  #runSystems(
-    schedule: Schedule,
-    options: { throwOnError?: boolean; errorPrefix?: string } = {},
-  ) {
+  #runSystems(schedule: Schedule, options: { suppress?: boolean } = {}) {
     const logger = this.#logger;
-    const shouldThrow = options.throwOnError ?? this.#config.throwOnSystemError;
-    const errorPrefix = options.errorPrefix ?? "system";
 
     for (const s of this.#systems.get(schedule)) {
       logger.debug("running system:", s.name);
       try {
         s.callback.apply(null, s.args);
       } catch (error) {
-        this.#config.onSystemError(error);
-        logger.critical(`Error in ${errorPrefix} ${s.name}: ${error}`);
-        if (shouldThrow) {
+        logger.error(`in schedule ${schedule} system ${s.name}`, error);
+
+        if (!options.suppress) {
           throw error;
         }
       }
@@ -2066,6 +2168,11 @@ export class App {
       );
     }
     return queue;
+  }
+
+  #fatal(error: unknown) {
+    this.#logger.critical("app shutting down", error);
+    this.destroy();
   }
 }
 
